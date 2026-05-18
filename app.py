@@ -98,7 +98,7 @@ if st.session_state.tryb_pracy == "MENU_START":
     with col_config1:
         # Automatyczne podpowiadanie kolejnego numeru zmiany
         maks_zmiana = 0
-        for zm i df_baza["Zmiana"].dropna().astype(str):
+        for zm in df_baza["Zmiana"].dropna().astype(str):
             if "Zmiana" in zm:
                 try:
                     nr = int(zm.replace("Zmiana", "").strip())
