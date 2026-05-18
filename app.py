@@ -3,43 +3,83 @@ from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 
 # Konfiguracja strony Streamlit
-st.set_page_config(page_title="System Punktacji TRAP v6.5", layout="wide")
+st.set_page_config(page_title="System Punktacji TRAP v7.0", layout="wide")
 
-st.title("🎯 System Punktacji TRAP — Wersja Chmurowa")
+st.title("🎯 System Punktacji TRAP — Wersja Stabilna v7.0")
 
-# 1. Pobieranie danych z Google Sheets (wersja odporna na błąd HTTP 400)
-# Podmieniamy tekstową nazwę zakładki na bezpośredni import przez unikalny numer GID
+# Styl CSS dla pięknej, czytelnej siatki strzałów
+st.markdown("""
+<style>
+    .shot-box {
+        display: inline-block;
+        width: 28px;
+        height: 28px;
+        line-height: 28px;
+        text-align: center;
+        margin: 2px;
+        border-radius: 4px;
+        font-weight: bold;
+        color: white;
+        border: 1px solid #ccc;
+    }
+    .shot-blank { background-color: #e5e7eb; color: #9ca3af; }
+    .shot-t1 { background-color: #1e40af; }
+    .shot-t2 { background-color: #15803d; }
+    .shot-miss { background-color: #b91c1c; }
+    .current-player { background-color: #fef08a; border: 2px solid #eab308; padding: 10px; border-radius: 8px; }
+</style>
+""", unsafe_allow_html=True)
+
+# 1. Pobieranie danych z Google Sheets (z auto-naprawą uciętych nagłówków)
 SPREADSHEET_ID = "1I8OGAXZEDWY3wgP_hKaepQF390BCUwxMBOrcPDJmlhA"
-GID_WYNIKI = "0"  # Jeśli w przeglądarce po kliknięciu w zakładkę masz inny numer gid niż 0, wpisz go tutaj!
+GID_WYNIKI = "0" 
 
 URL_CSV = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/export?format=csv&gid={GID_WYNIKI}"
 
-try:
-    # Wczytujemy dane bezpośrednio z silnika Google przez uniwersalny format CSV
-    df_baza = pd.read_csv(URL_CSV)
-    # Inicjalizujemy połączenie gsheets tylko do celów późniejszego zapisu (update)
-    conn = st.connection("gsheets", type=GSheetsConnection)
-except Exception as e:
-    st.error(f"Nie udało się połączyć z Arkuszem Google. Sprawdź konfigurację Secrets lub udostępniania. Błąd: {e}")
-    st.stop()
+def pobierz_i_napraw_baze():
+    try:
+        df = pd.read_csv(URL_CSV)
+        
+        # Słownik naprawczy dla uciętych kolumn w Excelu/Google Sheets
+        mapa_kolumn = {
+            'uma trafie': 'Suma trafień',
+            'Suma trafie': 'Suma trafień',
+            'za pierwsz': 'Ile za pierwszym',
+            'Ile za pierwsz': 'Ile za pierwszym',
+            'Nazwisko': 'Nazwisko',
+            'Zmiana': 'Zmiana',
+            'Typ': 'Typ'
+        }
+        
+        # Przemianuj kolumny jeśli istnieją ucięte wersje
+        nowe_nazwy = {}
+        for col in df.columns:
+            for klucz, wartosc in mapa_kolumn.items():
+                if klucz in col:
+                    nowe_nazwy[col] = wartosc
+        df = df.rename(columns=nowe_nazwy)
+        
+        # Gwarancja istnienia bazowych kolumn
+        for wymagana in ["Nazwisko", "Zmiana", "Typ", "Suma trafień", "Ile za pierwszym"]:
+            if wymagana not in df.columns:
+                df[wymagana] = None
+                
+        return df
+    except Exception as e:
+        st.error(f"⚠️ Błąd krytyczny pobierania bazy: {e}")
+        st.stop()
 
-# Czyszczenie danych wejściowych z bazy
-if not df_baza.empty and "Nazwisko" in df_baza.columns:
-    df_baza["Nazwisko"] = df_baza["Nazwisko"].fillna("").astype(str).str.strip()
+# Wczytanie bazy danych
+df_baza = pobierz_i_napraw_baze()
+
+# WYMUSZENIE DUŻYCH LITER (UPPERCASE) dla nazwisk z pliku
+if not df_baza.empty:
+    df_baza["Nazwisko"] = df_baza["Nazwisko"].fillna("").astype(str).str.strip().str.upper()
     df_baza = df_baza[df_baza["Nazwisko"] != ""]
-else:
-    st.error("W bazie danych nie znaleziono kolumny o nazwie 'Nazwisko'. Upewnij się, że w pierwszej zakładce komórka A1 zawiera tekst 'Nazwisko'.")
-    st.stop()
-
-# Zapewnienie wymaganych kolumn strukturalnych
-for col in ["Zmiana", "Typ", "Suma trafień", "Ile za pierwszym"]:
-    if col not in df_baza.columns:
-        df_baza[col] = None
 
 # --- FUNKCJE POMOCNICZE DO RANKINGU ---
 def zbuduj_tabela_rankingu(df_input, typ_konkurencji):
     df = df_input.copy()
-    
     df["Typ"] = df["Typ"].fillna("").astype(str).str.strip()
     df["Suma trafień"] = pd.to_numeric(df["Suma trafień"], errors='coerce')
     df["Ile za pierwszym"] = pd.to_numeric(df["Ile za pierwszym"], errors='coerce').fillna(0)
@@ -83,7 +123,7 @@ def zbuduj_tabela_rankingu(df_input, typ_konkurencji):
     })
     return tabela
 
-# --- INICJACJA STANU APLIKACJI (st.session_state) ---
+# --- INICJACJA STANU APLIKACJI ---
 if "tryb_pracy" not in st.session_state:
     st.session_state.tryb_pracy = "MENU_START"
 if "wybrani_zawodnicy" not in st.session_state:
@@ -120,7 +160,7 @@ if st.session_state.tryb_pracy == "MENU_START":
     for nazwisko in df_baza["Nazwisko"].unique():
         wiersze = df_baza[df_baza["Nazwisko"] == nazwisko]
         
-        standard_zrobiony = any(wiersze[(wiersze["Typ"] == "Standard") | (wiersze["Typ"].isna()) & (wiersze.index == wiersze.index[0])]["Suma trafień"].notna())
+        standard_zrobiony = any(wiersze[(wiersze["Typ"] == "Standard") | (wiersze["Typ"].isna())]["Suma trafień"].notna())
         pk_zrobiony = any(wiersze[wiersze["Typ"] == "PK"]["Suma trafień"].notna())
         
         if not standard_zrobiony:
@@ -148,27 +188,37 @@ if st.session_state.tryb_pracy == "MENU_START":
             
             if wybrany_z_listy != "":
                 obj = next(z for z in zawodnicy_dostepni if z["wyswietl"] == wybrany_z_listy)
-                finalne_nazwisko = obj["czyste"]
+                finalne_nazwisko = obj["czyste"].upper()  # Wymuszenie wielkich liter
                 finalny_typ = obj["typ"]
             elif wpisany_recznie != "":
-                finalne_nazwisko = wpisany_recznie
+                finalne_nazwisko = wpisany_recznie.upper()  # Wymuszenie wielkich liter dla ręcznego wpisu
                 finalny_typ = typ_reczny
                 
             if finalne_nazwisko:
                 id_unikalne = f"{finalne_nazwisko} [PK]" if finalny_typ == "PK" else finalne_nazwisko
                 st.session_state.wybrani_zawodnicy.append({
-                    "stanowisko": len(st.session_state.wybrani_zawodnicy) + 1,
                     "nazwisko": finalne_nazwisko,
                     "id_unikalne": id_unikalne,
                     "typ": finalny_typ
                 })
                 st.rerun()
 
+    # --- NOWA FUNKCJA: USUWANIE POJEDYNCZYCH ZAWODNIKÓW ---
     if st.session_state.wybrani_zawodnicy:
-        st.markdown("#### Aktualny skład na stanowiskach:")
-        df_sklad = pd.DataFrame(st.session_state.wybrani_zawodnicy)
-        st.table(df_sklad[["stanowisko", "id_unikalne", "typ"]])
-        if st.button("❌ Wyczysc sklad zmiany"):
+        st.markdown("#### Wybrani zawodnicy na stanowiskach:")
+        
+        for i, zaw in enumerate(st.session_state.wybrani_zawodnicy):
+            col_z1, col_z2, col_z3 = st.columns([1, 5, 2])
+            with col_z1:
+                st.markdown(f"**Stanowisko {i+1}**")
+            with col_z2:
+                st.info(f"👤 {zaw['id_unikalne']} ({zaw['typ']})")
+            with col_z3:
+                if st.button(f"🗑️ Usuń", key=f"del_{i}"):
+                    st.session_state.wybrani_zawodnicy.pop(i)
+                    st.rerun()
+                    
+        if st.button("❌ Wyczyść cały skład"):
             st.session_state.wybrani_zawodnicy = []
             st.rerun()
 
@@ -189,36 +239,51 @@ if st.session_state.tryb_pracy == "MENU_START":
             st.rerun()
             
     st.markdown("---")
-    st.subheader("📊 Aktualne Klasyfikacje Generalne (Pobrane z chmury)")
+    st.subheader("📊 Aktualne Klasyfikacje Generalne")
     tab1, tab2 = st.tabs(["🏆 Klasyfikacja Główna (Standard)", "🎯 Klasyfikacja Poza Konkurencją (PK)"])
     with tab1:
-        st.dataframe(zbuduj_tabela_rankingu(df_baza, "Standard"), use_container_width=True)
+        st.dataframe(zbuild_tabela_rankingu(df_baza, "Standard") if 'zbuild_tabela_rankingu' in locals() else zbuduj_tabela_rankingu(df_baza, "Standard"), use_container_width=True)
     with tab2:
-        st.dataframe(zbuduj_tabela_rankingu(df_baza, "PK"), use_container_width=True)
+        st.dataframe(zbuild_tabela_rankingu(df_baza, "PK") if 'zbuild_tabela_rankingu' in locals() else zbuduj_tabela_rankingu(df_baza, "PK"), use_container_width=True)
 
-# --- INTERFEJS 2: EKRAN KARTY STRZELAŃ (OSIE STRZELECKIE) ---
+# --- INTERFEJS 2: EKRAN KARTY STRZELAŃ ---
 elif st.session_state.tryb_pracy == "OS_STRZELECKA":
     st.subheader(f"🏟️ KARTA KONKURENCJI: {st.session_state.nazwa_zmiany.upper()} — {st.session_state.limit_rzutkow} RZUTKÓW")
     
-    dane_wizualne = []
-    for z in st.session_state.wybrani_zawodnicy:
+    # NOWA, CZYTELNA PREZENTACJA GRAFICZNA KARTY STRZELAŃ
+    for i, z in enumerate(st.session_state.wybrani_zawodnicy):
         id_u = z["id_unikalne"]
         strzaly = st.session_state.macierz_wynikow[id_u]
         
         suma_laczna = sum(1 for s in strzaly if s in ["/", "X"])
         suma_pierwszy = sum(1 for s in strzaly if s == "/")
         
-        rekord = {
-            "Stanowisko": z["stanowisko"],
-            "Zawodnik": id_u,
-            "Typ": z["typ"],
-            "Wynik serii": " ".join(strzaly),
-            "SUMA (Trafienia / Pierwszy)": f" {suma_laczna} / {suma_pierwszy} "
-        }
-        dane_wizualne.append(rekord)
-        
-    st.dataframe(pd.DataFrame(dane_wizualne), use_container_width=True, hide_index=True)
-
+        # Generator bloków HTML dla strzałów
+        html_strzaly = ""
+        for s_idx, s in enumerate(strzaly):
+            klasa = "shot-blank"
+            if s == "/": klasa = "shot-t1"
+            elif s == "X": klasa = "shot-t2"
+            elif s == "O": klasa = "shot-miss"
+            
+            # Wyróżnienie komórki, w którą aktualnie powinien paść strzał
+            if st.session_state.aktualny_strzal < st.session_state.limit_rzutkow:
+                if s_idx == st.session_state.aktualny_strzal and i == st.session_state.aktualny_zawodnik_idx:
+                    klasa += " current-target"
+                    s = "●"
+                    
+            html_strzaly += f'<div class="shot-box {klasa}">{s}</div>'
+            if (s_idx + 1) % 5 == 0: # Odstęp między seriami po 5 strzałów
+                html_strzaly += "&nbsp;&nbsp;"
+                
+        col_k1, col_k2, col_k3 = st.columns([1, 3, 5])
+        with col_k1:
+            st.markdown(f"**Stan. {i+1}** ({z['typ']})")
+        with col_k2:
+            st.markdown(f"**{id_u}**")
+        with col_k3:
+            st.markdown(f'{html_strzaly} &nbsp;&nbsp;&nbsp;&nbsp; 📊 **{suma_laczna} / {suma_pierwszy}**', unsafe_allow_html=True)
+            
     st.markdown("---")
     
     if st.session_state.aktualny_strzal >= st.session_state.limit_rzutkow:
@@ -226,9 +291,9 @@ elif st.session_state.tryb_pracy == "OS_STRZELECKA":
         
         if st.button("💾 ZAPISZ WYNIKI I WYŚLIJ DO GOOGLE SHEETS", type="primary", use_container_width=True):
             with st.spinner("Trwa aktualizacja bazy danych i przeliczanie rankingów..."):
-                # Ponowne pobranie najświeższej bazy przez CSV przed zapisem
-                df_aktualna_baza = pd.read_csv(URL_CSV)
-                df_aktualna_baza["Nazwisko"] = df_aktualna_baza["Nazwisko"].fillna("").astype(str).str.strip()
+                
+                df_aktualna_baza = pobierz_i_napraw_baze()
+                df_aktualna_baza["Nazwisko"] = df_aktualna_baza["Nazwisko"].fillna("").astype(str).str.strip().str.upper()
                 
                 for i in range(1, st.session_state.limit_rzutkow + 1):
                     col_name = f"Strzał_{i}"
@@ -236,7 +301,7 @@ elif st.session_state.tryb_pracy == "OS_STRZELECKA":
                         df_aktualna_baza[col_name] = None
 
                 for z in st.session_state.wybrani_zawodnicy:
-                    nazwisko = z["nazwisko"]
+                    nazwisko = z["nazwisko"].upper()
                     typ_startu = z["typ"]
                     strzaly_zawodnika = st.session_state.macierz_wynikow[z["id_unikalne"]]
                     
@@ -251,7 +316,7 @@ elif st.session_state.tryb_pracy == "OS_STRZELECKA":
                         obecny_typ = str(df_aktualna_baza.at[idx, "Typ"]).strip()
                         obecna_suma = str(df_aktualna_baza.at[idx, "Suma trafień"]).strip()
                         
-                        if obecny_typ in ["", "nan"] or obecny_typ == "None":
+                        if obecny_typ in ["", "nan", "None"]:
                             obecny_typ = "Standard" if list(indeksy_zawodnika).index(idx) == 0 else "PK"
                         
                         if obecna_zmiana in ["", "nan", "None"] or obecna_suma in ["", "nan", "None"]:
@@ -284,26 +349,33 @@ elif st.session_state.tryb_pracy == "OS_STRZELECKA":
                 df_rezultaty_standard = zbuduj_tabela_rankingu(df_aktualna_baza, "Standard")
                 df_rezultaty_pk = zbuduj_tabela_rankingu(df_aktualna_baza, "PK")
                 
-                # Zapis z powrotem za pomocą zmapowanego konektora
+                conn = st.connection("gsheets", type=GSheetsConnection)
                 conn.update(worksheet="Wyniki_Szczegolowe", data=df_aktualna_baza)
                 conn.update(worksheet="Rezultaty", data=df_rezultaty_standard)
                 conn.update(worksheet="Rezultaty_PK", data=df_rezultaty_pk)
                 
-                st.success("✅ Dane pomyślnie wysłane do Arkusza Google! Rankingi zostały zaktualizowane.")
+                st.success("✅ Dane pomyślnie wysłane do Arkusza Google! Klasyfikacja została zaktualizowana.")
                 st.session_state.wybrani_zawodnicy = []
                 st.session_state.tryb_pracy = "MENU_START"
                 st.rerun()
     else:
         aktualny_zawodnik = st.session_state.wybrani_zawodnicy[st.session_state.aktualny_zawodnik_idx]
         
+        # Bezpieczny panel sterowania kolejką strzelania
+        st.markdown(f'<div class="current-player">', unsafe_allow_html=True)
         st.markdown(f"### 📣 Bieżący strzał:")
-        st.info(f"**STANOWISKO {aktualny_zawodnik['stanowisko']}**: {aktualny_zawodnik['id_unikalne']} | **Strzał nr {st.session_state.aktualny_strzal + 1}** z {st.session_state.limit_rzutkow}")
+        st.markdown(f"**STANOWISKO {st.session_state.aktualny_zawodnik_idx + 1}**: 👤 `{aktualny_zawodnik['id_unikalne']}` | **Strzał nr {st.session_state.aktualny_strzal + 1}** z {st.session_state.limit_rzutkow}")
+        st.markdown(f'</div>', unsafe_allow_html=True)
+        st.write("")
         
         def rejestruj_trafienie(symbol):
-            id_u = aktualny_zawodnik['id_unikalne']
+            id_u = st.session_state.wybrani_zawodnicy[st.session_state.aktualny_zawodnik_idx]['id_unikalne']
             st.session_state.macierz_wynikow[id_u][st.session_state.aktualny_strzal] = symbol
             
+            # Przejście do kolejnego stanowiska
             st.session_state.aktualny_zawodnik_idx += 1
+            
+            # Jeśli cała zmiana oddała strzał, przechodzimy do następnego rzutka w serii
             if st.session_state.aktualny_zawodnik_idx >= len(st.session_state.wybrani_zawodnicy):
                 st.session_state.aktualny_zawodnik_idx = 0
                 st.session_state.aktualny_strzal += 1
