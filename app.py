@@ -3,9 +3,9 @@ from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 
 # Konfiguracja strony Streamlit
-st.set_page_config(page_title="System Punktacji TRAP v7.6", layout="wide")
+st.set_page_config(page_title="System Punktacji TRAP v7.7", layout="wide")
 
-st.title("🎯 System Punktacji TRAP — Wersja Chmurowa v7.6")
+st.title("🎯 System Punktacji TRAP — Wersja Chmurowa v7.7")
 
 # Piękna i czytelna siatka strzałów (Karta Strzelań)
 st.markdown("""
@@ -42,8 +42,8 @@ except Exception as e:
 
 def pobierz_i_napraw_baze():
     try:
-        # Pobranie danych przez oficjalny konektor (gwarantuje odświeżenie danych)
-        df = conn.read(worksheet="Wyniki_Szczegolowe", ttl="0d")
+        # Pobieramy dane bez podawania nazwy worksheet – pobierze domyślną, pierwszą zakładkę (gid=0)
+        df = conn.read(ttl="0d")
         
         # Słownik auto-naprawy uciętych nagłówków z Excela
         mapa_kolumn = {
@@ -64,7 +64,7 @@ def pobierz_i_napraw_baze():
                 df[wymagana] = None
         return df
     except Exception as e:
-        st.error(f"⚠️ Nie można odczytać arkusza 'Wyniki_Szczegolowe'. Upewnij się, że taka zakładka istnieje. Błąd: {e}")
+        st.error(f"⚠️ Nie można odczytać głównego arkusza zawodników. Upewnij się, że plik zawiera poprawne kolumny. Błąd: {e}")
         st.stop()
 
 # Wczytanie bazy danych
@@ -140,7 +140,7 @@ if st.session_state.tryb_pracy == "MENU_START":
         if not standard_zrobiony: zawodnicy_dostepni.append({"wyswietl": nazwisko, "czyste": nazwisko, "typ": "Standard"})
         if standard_zrobiony and not pk_zrobiony: zawodnicy_dostepni.append({"wyswietl": f"{nazwisko} [PK]", "czyste": nazwisko, "typ": "PK"})
 
-    juz_dodani = [z["id_unikalne"] for z in st.session_state.wybrani_zawodnicy]
+    juz_dodani = [z["id_unikalne"] for z in st.session_state.wybrani_zawodwidgets] if 'wybrani_zawodwidgets' in locals() else [z["id_unikalne"] for z in st.session_state.wybrani_zawodnicy]
     opcje_wyboru = [z["wyswietl"] for z in zawodnicy_dostepni if z["wyswietl"] not in juz_dodani]
     
     col_dodaj1, col_dodaj2, col_dodaj3 = st.columns([3, 2, 2])
@@ -270,15 +270,9 @@ elif st.session_state.tryb_pracy == "OS_STRZELECKA":
                         for i, sym in enumerate(strzaly_zawodnika): nowy_wiersz[f"Strzał_{i+1}"] = sym
                         df_aktualna_baza = pd.concat([df_aktualna_baza, pd.DataFrame([nowy_wiersz])], ignore_index=True)
                 
-                # WYGENEROWANIE RANKINGÓW PRZED ZAPISEM
-                df_rezultaty_standard = zbuduj_tabela_rankingu(df_aktualna_baza, "Standard")
-                df_rezultaty_pk = zbuduj_tabela_rankingu(df_aktualna_baza, "PK")
-                
                 try:
-                    # WYWYŁANIE DO GOOGLE SŁUŻBOWYM KONEKTOREM
-                    conn.update(worksheet="Wyniki_Szczegolowe", data=df_aktualna_baza)
-                    conn.update(worksheet="Rezultaty", data=df_rezultaty_standard)
-                    conn.update(worksheet="Rezultaty_PK", data=df_rezultaty_pk)
+                    # Wysyłamy dane (nadpisując domyślną zakładkę)
+                    conn.update(data=df_aktualna_baza)
                     
                     st.success("✅ Sukces! Wyniki zostały zapisane bezpośrednio w chmurze.")
                     st.session_state.wybrani_zawodnicy = []
