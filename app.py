@@ -161,7 +161,7 @@ if st.session_state.tryb_pracy == "MENU_START":
         st.markdown("#### Aktualny skład na stanowiskach:")
         df_sklad = pd.DataFrame(st.session_state.wybrani_zawodnicy)
         st.table(df_sklad[["stanowisko", "id_unikalne", "typ"]])
-        if st.button("❌ Wyczyszcz skład zmiany"):
+        if st.button("❌ Wyczysc sklad zmiany"):
             st.session_state.wybrani_zawodnicy = []
             st.rerun()
 
