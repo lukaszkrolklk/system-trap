@@ -12,7 +12,7 @@ st.title("🎯 System Punktacji TRAP — Wersja Chmurowa")
 try:
     conn = st.connection("gsheets", type=GSheetsConnection)
     # Wczytujemy arkusz "Wyniki Szczegółowe" bezpośrednio z podanego przez Ciebie dokumentu
-    df_baza = conn.read(worksheet="Wyniki Szczegółowe", ttl=0)
+    df_baza = conn.read(worksheet="Wyniki%20Szczegółowe", ttl=0)
 except Exception as e:
     st.error(f"Nie udało się połączyć z Arkuszem Google. Sprawdź konfigurację Secrets. Błąd: {e}")
     st.stop()
@@ -232,7 +232,7 @@ elif st.session_state.tryb_pracy == "OS_STRZELECKA":
         
         if st.button("💾 ZAPISZ WYNIKI I WYŚLIJ DO GOOGLE SHEETS", type="primary", use_container_width=True):
             with st.spinner("Trwa aktualizacja bazy danych i przeliczanie rankingów..."):
-                df_aktualna_baza = conn.read(worksheet="Wyniki Szczegółowe", ttl=0)
+                df_aktualna_baza = conn.read(worksheet="Wyniki%20Szczegółowe", ttl=0)
                 df_aktualna_baza["Nazwisko"] = df_aktualna_baza["Nazwisko"].fillna("").astype(str).str.strip()
                 
                 # Zapewnienie kolumn na strzały w strukturze danych Google Sheets
@@ -295,7 +295,7 @@ elif st.session_state.tryb_pracy == "OS_STRZELECKA":
                 df_rezultaty_pk = zbuduj_tabela_rankingu(df_aktualna_baza, "PK")
                 
                 # Zapis wieloarkuszowy do Google Sheets za pomocą konektora
-                conn.update(worksheet="Wyniki Szczegółowe", data=df_aktualna_baza)
+                conn.update(worksheet="Wyniki%20Szczegółowe", data=df_aktualna_baza)
                 conn.update(worksheet="Rezultaty", data=df_rezultaty_standard)
                 conn.update(worksheet="Rezultaty PK", data=df_rezultaty_pk)
                 
