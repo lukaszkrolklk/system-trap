@@ -7,13 +7,20 @@ st.set_page_config(page_title="System Punktacji TRAP v6.5", layout="wide")
 
 st.title("🎯 System Punktacji TRAP — Wersja Chmurowa")
 
-# 1. Połączenie z Google Sheets
+# 1. Pobieranie danych z Google Sheets (wersja odporna na błąd HTTP 400)
+# Podmieniamy tekstową nazwę zakładki na bezpośredni import przez unikalny numer GID
+SPREADSHEET_ID = "1I8OGAXZEDWY3wgP_hKaepQF390BCUwxMBOrcPDJmlhA"
+GID_WYNIKI = "0"  # Jeśli w przeglądarce po kliknięciu w zakładkę masz inny numer gid niż 0, wpisz go tutaj!
+
+URL_CSV = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/export?format=csv&gid={GID_WYNIKI}"
+
 try:
+    # Wczytujemy dane bezpośrednio z silnika Google przez uniwersalny format CSV
+    df_baza = pd.read_csv(URL_CSV)
+    # Inicjalizujemy połączenie gsheets tylko do celów późniejszego zapisu (update)
     conn = st.connection("gsheets", type=GSheetsConnection)
-    # Wczytujemy zaktualizowaną nazwę arkusza bezpieczną dla ASCII
-    df_baza = conn.read(worksheet="Wyniki_Szczegolowe", ttl=0)
 except Exception as e:
-    st.error(f"Nie udało się połączyć z Arkuszem Google. Sprawdź konfigurację Secrets. Błąd: {e}")
+    st.error(f"Nie udało się połączyć z Arkuszem Google. Sprawdź konfigurację Secrets lub udostępniania. Błąd: {e}")
     st.stop()
 
 # Czyszczenie danych wejściowych z bazy
@@ -21,7 +28,7 @@ if not df_baza.empty and "Nazwisko" in df_baza.columns:
     df_baza["Nazwisko"] = df_baza["Nazwisko"].fillna("").astype(str).str.strip()
     df_baza = df_baza[df_baza["Nazwisko"] != ""]
 else:
-    st.error("Arkusz 'Wyniki_Szczegolowe' jest pusty lub nie zawiera kolumny 'Nazwisko'.")
+    st.error("W bazie danych nie znaleziono kolumny o nazwie 'Nazwisko'. Upewnij się, że w pierwszej zakładce komórka A1 zawiera tekst 'Nazwisko'.")
     st.stop()
 
 # Zapewnienie wymaganych kolumn strukturalnych
@@ -219,7 +226,8 @@ elif st.session_state.tryb_pracy == "OS_STRZELECKA":
         
         if st.button("💾 ZAPISZ WYNIKI I WYŚLIJ DO GOOGLE SHEETS", type="primary", use_container_width=True):
             with st.spinner("Trwa aktualizacja bazy danych i przeliczanie rankingów..."):
-                df_aktualna_baza = conn.read(worksheet="Wyniki_Szczegolowe", ttl=0)
+                # Ponowne pobranie najświeższej bazy przez CSV przed zapisem
+                df_aktualna_baza = pd.read_csv(URL_CSV)
                 df_aktualna_baza["Nazwisko"] = df_aktualna_baza["Nazwisko"].fillna("").astype(str).str.strip()
                 
                 for i in range(1, st.session_state.limit_rzutkow + 1):
@@ -276,7 +284,7 @@ elif st.session_state.tryb_pracy == "OS_STRZELECKA":
                 df_rezultaty_standard = zbuduj_tabela_rankingu(df_aktualna_baza, "Standard")
                 df_rezultaty_pk = zbuduj_tabela_rankingu(df_aktualna_baza, "PK")
                 
-                # Zapis do oczyszczonych nazw zakładek
+                # Zapis z powrotem za pomocą zmapowanego konektora
                 conn.update(worksheet="Wyniki_Szczegolowe", data=df_aktualna_baza)
                 conn.update(worksheet="Rezultaty", data=df_rezultaty_standard)
                 conn.update(worksheet="Rezultaty_PK", data=df_rezultaty_pk)
