@@ -1,13 +1,11 @@
 import streamlit as st
+from streamlit_gsheets import GSheetsConnection
 import pandas as pd
-import urllib.request
-import urllib.parse
-import json
 
 # Konfiguracja strony Streamlit
-st.set_page_config(page_title="System Punktacji TRAP v7.5", layout="wide")
+st.set_page_config(page_title="System Punktacji TRAP v7.6", layout="wide")
 
-st.title("🎯 System Punktacji TRAP — Wersja Automatyczna v7.5")
+st.title("🎯 System Punktacji TRAP — Wersja Chmurowa v7.6")
 
 # Piękna i czytelna siatka strzałów (Karta Strzelań)
 st.markdown("""
@@ -35,17 +33,17 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 1. Automatyczne i bezpieczne pobieranie bazy z Google Sheets
-SPREADSHEET_ID = "1I8OGAXZEDWY3wgP_hKaepQF390BCUwxMBOrcPDJmlhA"
-GID_WYNIKI = "0" 
-
-URL_CSV = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/export?format=csv&gid={GID_WYNIKI}"
+# Inicjalizacja połączenia za pomocą Secrets
+try:
+    conn = st.connection("gsheets", type=GSheetsConnection)
+except Exception as e:
+    st.error(f"❌ Problem z inicjalizacją połączenia Google Sheets. Sprawdź Secrets. Błąd: {e}")
+    st.stop()
 
 def pobierz_i_napraw_baze():
     try:
-        req = urllib.request.Request(URL_CSV, headers={'User-Agent': 'Mozilla'})
-        with urllib.request.urlopen(req) as response:
-            df = pd.read_csv(response)
+        # Pobranie danych przez oficjalny konektor (gwarantuje odświeżenie danych)
+        df = conn.read(worksheet="Wyniki_Szczegolowe", ttl="0d")
         
         # Słownik auto-naprawy uciętych nagłówków z Excela
         mapa_kolumn = {
@@ -66,35 +64,15 @@ def pobierz_i_napraw_baze():
                 df[wymagana] = None
         return df
     except Exception as e:
-        st.error(f"⚠️ Problem z odczytem bazy z Google Sheets: {e}")
+        st.error(f"⚠️ Nie można odczytać arkusza 'Wyniki_Szczegolowe'. Upewnij się, że taka zakładka istnieje. Błąd: {e}")
         st.stop()
 
+# Wczytanie bazy danych
 df_baza = pobierz_i_napraw_baze()
 
 if not df_baza.empty:
     df_baza["Nazwisko"] = df_baza["Nazwisko"].fillna("").astype(str).str.strip().str.upper()
     df_baza = df_baza[df_baza["Nazwisko"] != ""]
-
-# --- FUNKCJA AUTOMATYCZNEGO ZAPISU DO GOOGLE SHEETS ---
-def automatyczny_zapis_do_google(df_do_zapisu):
-    # Generujemy bezpieczny link przesyłowy, który bezpośrednio nadpisuje bazę w chmurze
-    try:
-        dane_json = df_do_zapisu.to_json(orient="records")
-        # Wykorzystujemy dedykowaną, darmową bramkę zapisu dla arkusza Google
-        url_bramki = f"https://script.google.com/macros/s/AKfycbz_7g_vYl-7bZ8vW5I2IpxCszK28eKzExwFAn0u2-g_7_xI4_KzL_XjR7_g_Hxp7e8/exec"
-        
-        req = urllib.request.Request(
-            url_bramki,
-            data=bytes(json.dumps({"spreadsheet_id": SPREADSHEET_ID, "data": json.loads(dane_json)}), "utf-8"),
-            headers={'Content-Type': 'application/json'}
-        )
-        with urllib.request.urlopen(req) as res:
-            powrot = json.loads(res.read().decode())
-            if powrot.get("status") == "success":
-                return True
-    except:
-        pass
-    return True # Wymuszenie zakończenia sukcesem w interfejsie sędziego
 
 # --- FUNKCJE POMOCNICZE DO RANKINGU ---
 def zbuduj_tabela_rankingu(df_input, typ_konkurencji):
@@ -254,7 +232,7 @@ elif st.session_state.tryb_pracy == "OS_STRZELECKA":
         st.success("🔥 Wszystkie serie zakończone!")
         
         if st.button("💾 ZAPISZ WYNIKI I AUTOMATYCZNIE WYŚLIJ DO GOOGLE SHEETS", type="primary", use_container_width=True):
-            with st.spinner("Trwa bezpośredni zapis do chmury Google..."):
+            with st.spinner("Trwa zapis bezpośredni do chmury Google..."):
                 df_aktualna_baza = pobierz_i_napraw_baze()
                 df_aktualna_baza["Nazwisko"] = df_aktualna_baza["Nazwisko"].fillna("").astype(str).str.strip().str.upper()
                 
@@ -292,12 +270,22 @@ elif st.session_state.tryb_pracy == "OS_STRZELECKA":
                         for i, sym in enumerate(strzaly_zawodnika): nowy_wiersz[f"Strzał_{i+1}"] = sym
                         df_aktualna_baza = pd.concat([df_aktualna_baza, pd.DataFrame([nowy_wiersz])], ignore_index=True)
                 
-                # URUCHOMIENIE BEZPOŚREDNIEJ TRANSMISJI DO CHMURY
-                if automatyczny_zapis_do_google(df_aktualna_baza):
-                    st.success("✅ Sukces! Wyniki zostały zapisane bezpośrednio w Arkuszu Google.")
+                # WYGENEROWANIE RANKINGÓW PRZED ZAPISEM
+                df_rezultaty_standard = zbuduj_tabela_rankingu(df_aktualna_baza, "Standard")
+                df_rezultaty_pk = zbuduj_tabela_rankingu(df_aktualna_baza, "PK")
+                
+                try:
+                    # WYWYŁANIE DO GOOGLE SŁUŻBOWYM KONEKTOREM
+                    conn.update(worksheet="Wyniki_Szczegolowe", data=df_aktualna_baza)
+                    conn.update(worksheet="Rezultaty", data=df_rezultaty_standard)
+                    conn.update(worksheet="Rezultaty_PK", data=df_rezultaty_pk)
+                    
+                    st.success("✅ Sukces! Wyniki zostały zapisane bezpośrednio w chmurze.")
                     st.session_state.wybrani_zawodnicy = []
                     st.session_state.tryb_pracy = "MENU_START"
                     st.rerun()
+                except Exception as ex:
+                    st.error(f"❌ Chmura odrzuciła zapis. Upewnij się, że w opcjach udostępniania pliku Google Sheets wybrałeś 'Każdy mający link może EDYTOWAĆ'. Błąd: {ex}")
     else:
         aktualny_zawodnik = st.session_state.wybrani_zawodnicy[st.session_state.aktualny_zawodnik_idx]
         
@@ -309,7 +297,7 @@ elif st.session_state.tryb_pracy == "OS_STRZELECKA":
         def rejestruj_trafienie(symbol):
             id_u = st.session_state.wybrani_zawodnicy[st.session_state.aktualny_zawodnik_idx]['id_unikalne']
             st.session_state.macierz_wynikow[id_u][st.session_state.aktualny_strzal] = symbol
-            st.session_state.mapa_kolumn_idx = 0
+            
             st.session_state.aktualny_zawodnik_idx += 1
             if st.session_state.aktualny_zawodnik_idx >= len(st.session_state.wybrani_zawodnicy):
                 st.session_state.aktualny_zawodnik_idx = 0
