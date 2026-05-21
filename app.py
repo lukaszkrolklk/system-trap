@@ -555,7 +555,8 @@ if pliki:
         index=index,
     )
 
-    if st.sidebar.button("🗑 Usuń wybrany plik", use_container_width=True):
+if st.sidebar.button("🗑 Usuń wybrany plik", use_container_width=True):
+
     try:
         plik_do_usuniecia = DATA_DIR / wybor_pliku
 
@@ -570,6 +571,9 @@ if pliki:
         zakoncz_i_wroc_do_menu()
 
         st.rerun()
+
+    except Exception as e:
+        st.sidebar.error(f"Nie udało się usunąć pliku: {e}")
 
     except Exception as e:
         st.sidebar.error(f"Nie udało się usunąć pliku: {e}")
