@@ -534,6 +534,7 @@ def statusy_zawodnika(df: pd.DataFrame, nazwisko: str) -> tuple[bool, bool]:
     return standard_zrobiony, pk_zrobiony
 
 
+
 def zbuduj_liste_dostepnych(df: pd.DataFrame) -> list[dict]:
     wynik = []
 
@@ -541,23 +542,29 @@ def zbuduj_liste_dostepnych(df: pd.DataFrame) -> list[dict]:
         if not nazwisko:
             continue
 
-        standard_zrobiony, pk_zrobiony = statusy_zawodnika(df, nazwisko)
+        wiersze = df[df["Nazwisko"] == nazwisko].index.tolist()
 
-        if not standard_zrobiony:
-            wynik.append({
-                "wyswietl": nazwisko,
-                "nazwisko": nazwisko,
-                "typ": "Standard",
-            })
+        for idx in wiersze:
+            typ = wykryj_typ_zawodnika(df, nazwisko, idx)
+            suma = df.at[idx, "Suma trafień"]
 
-        if standard_zrobiony and not pk_zrobiony:
+            if czy_ma_wynik(suma):
+                continue
+
+            if typ == "Standard":
+                wyswietl = nazwisko
+            else:
+                wyswietl = f"{nazwisko} [PK]"
+
             wynik.append({
-                "wyswietl": f"{nazwisko} [PK]",
+                "wyswietl": wyswietl,
                 "nazwisko": nazwisko,
-                "typ": "PK",
+                "typ": typ,
             })
 
     return wynik
+
+
 
 
 def zapisz_pusty_start_zmiany(path: Path) -> None:
