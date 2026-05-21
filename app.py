@@ -878,7 +878,7 @@ if st.session_state.tryb_pracy == "MENU":
             c1, c2, c3 = st.columns([1, 5, 1])
 
             with c1:
-                st.write(f"**Stan. {i + 1}**")
+                st.write(f"**S {i + 1}**")
 
             with c2:
                 st.info(f"{z['id_unikalne']} — {z['typ']}")
@@ -970,7 +970,7 @@ elif st.session_state.tryb_pracy == "STRZELANIE":
         st.markdown(
             f"""
 <div class="player-row">
-    <div class="player-stand">Stan. {i + 1}</div>
+    <div class="player-stand">S {i + 1}</div>
     <div>
         <div class="player-name">{id_u}</div>
         <div class="player-type">{z["typ"]}</div>
