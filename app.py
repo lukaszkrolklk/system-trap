@@ -168,6 +168,8 @@ def normalizuj_naglowki(df: pd.DataFrame) -> pd.DataFrame:
     df["Zmiana"] = df["Zmiana"].fillna("").astype(str).str.strip()
     df["Typ"] = df["Typ"].fillna("").astype(str).str.strip()
     df["Status"] = df["Status"].fillna("").astype(str).str.strip()
+    
+    # Pozwalamy kolumnom wynikowym zachować typ numeryczny lub tekstowy bez agresywnego czyszczenia
     df["Suma trafień"] = df["Suma trafień"].fillna("").astype(str).str.strip()
     df["Ile za pierwszym"] = (
         df["Ile za pierwszym"].fillna("").astype(str).str.strip()
@@ -252,9 +254,15 @@ def zbuduj_liste_dostepnych(df: pd.DataFrame) -> list[dict]:
                 else:
                     pk_wolny = True
 
+        # POPRAWKA: Dodano klucz "id_unikalne" do zwracanego słownika
         if standard_wolny and not standard_zrobiony:
             dostepni.append(
-                {"wyswietl": nazwisko, "nazwisko": nazwisko, "typ": "Standard"}
+                {
+                    "wyswietl": nazwisko, 
+                    "nazwisko": nazwisko, 
+                    "typ": "Standard",
+                    "id_unikalne": nazwisko
+                }
             )
         if standard_zrobiony and pk_wolny and not pk_zrobiony:
             dostepni.append(
@@ -262,6 +270,7 @@ def zbuduj_liste_dostepnych(df: pd.DataFrame) -> list[dict]:
                     "wyswietl": f"{nazwisko} [PK]",
                     "nazwisko": nazwisko,
                     "typ": "PK",
+                    "id_unikalne": f"{nazwisko} [PK]"
                 }
             )
     return dostepni
@@ -379,7 +388,7 @@ def zapisz_wyniki_zmiany_do_df(df_baza: pd.DataFrame) -> pd.DataFrame:
                 "none",
             ]
 
-            if pusty_wiersz and obecny_typ == typ_startu:
+            if pusty_worsch == True or (pusty_wiersz and obecny_typ == typ_startu):
                 wybrany_idx = idx
                 break
 
@@ -391,8 +400,8 @@ def zapisz_wyniki_zmiany_do_df(df_baza: pd.DataFrame) -> pd.DataFrame:
                 "Status": (
                     "ZAKOŃCZONY" if typ_startu == "Standard" else "PK ZAKOŃCZONE"
                 ),
-                "Suma trafień": int(suma_laczna),
-                "Ile za pierwszym": int(suma_pierwszy),
+                "Suma trafień": str(suma_laczna),
+                "Ile za pierwszym": str(suma_pierwszy),
             }
             for i, sym in enumerate(strzaly, start=1):
                 nowy[f"Strzał_{i}"] = sym
@@ -403,13 +412,13 @@ def zapisz_wyniki_zmiany_do_df(df_baza: pd.DataFrame) -> pd.DataFrame:
             df.at[wybrany_idx, "Status"] = (
                 "ZAKOŃCZONY" if typ_startu == "Standard" else "PK ZAKOŃCZONE"
             )
-            df.at[wybrany_idx, "Suma trafień"] = int(suma_laczna)
-            df.at[wybrany_idx, "Ile za pierwszym"] = int(suma_pierwszy)
+            df.at[wybrany_idx, "Suma trafień"] = str(suma_laczna)
+            df.at[wybrany_idx, "Ile za pierwszym"] = str(suma_pierwszy)
 
             for i, sym in enumerate(strzaly, start=1):
                 df.at[wybrany_idx, f"Strzał_{i}"] = sym
 
-    return normalizuj_naglowki(df)
+    return df
 
 
 # ==================================================
@@ -439,7 +448,6 @@ init_state()
 # ==================================================
 st.sidebar.header("📁 Zarządzanie zawodami")
 
-# Wybór aktywnego pliku z listy
 dostepne_pliki = pobierz_liste_plikow_excel()
 
 if dostepne_pliki:
@@ -570,7 +578,7 @@ if st.session_state.tryb_pracy == "MENU_START":
 
     dostepni = zbuduj_liste_dostepnych(df_baza)
     juz_dodani = [z["id_unikalne"] for z in st.session_state.wybrani_zawodnicy]
-    opcje = [z["wyswietl"] for z in dostepni if z["wyswietl"] not in juz_dodani]
+    opcje = [z["wyswietl"] for z in dostepni if z["id_unikalne"] not in juz_dodani]
 
     col1, col2, col3 = st.columns([3, 3, 2])
 
@@ -698,8 +706,7 @@ elif st.session_state.tryb_pracy == "OS_STRZELECKA":
 
             pokaz_symbol = s
             if (
-                st.session_state.aktualny_strzal
-                < st.session_state.limit_rzutkow
+                st.session_state.aktualny_strzal < st.session_state.limit_rzutkow
                 and s_idx == st.session_state.aktualny_strzal
                 and i == st.session_state.aktualny_zawodnik_idx
             ):
@@ -726,7 +733,6 @@ elif st.session_state.tryb_pracy == "OS_STRZELECKA":
     st.markdown("---")
 
     def rejestruj(symbol: str):
-        # 1. Zapisz symbol strzału w pamięci sesji
         id_u = st.session_state.wybrani_zawodnicy[
             st.session_state.aktualny_zawodnik_idx
         ]["id_unikalne"]
@@ -734,7 +740,6 @@ elif st.session_state.tryb_pracy == "OS_STRZELECKA":
             st.session_state.aktualny_strzal
         ] = symbol
 
-        # 2. ZAPIS W CZASIE RZECZYWISTYM: Zrzucenie aktualnego stanu sesji prosto do pliku Excel
         try:
             df_aktualny = wczytaj_excel_lokalny(AKTYWNY_EXCEL_PATH)
             df_po_zapisie = zapisz_wyniki_zmiany_do_df(df_aktualny)
@@ -742,7 +747,6 @@ elif st.session_state.tryb_pracy == "OS_STRZELECKA":
         except Exception as e:
             st.error(f"Błąd automatycznego zapisu strzału: {e}")
 
-        # 3. Przesunięcie kolejki na następnego zawodnika / strzał
         st.session_state.aktualny_zawodnik_idx += 1
         if st.session_state.aktualny_zawodnik_idx >= len(
             st.session_state.wybrani_zawodnicy
@@ -822,7 +826,6 @@ elif st.session_state.tryb_pracy == "OS_STRZELECKA":
             or st.session_state.aktualny_zawodnik_idx > 0
         ):
             if st.button("↩️ Cofnij ostatni wpis"):
-                # Cofnięcie indeksu
                 if st.session_state.aktualny_zawodnik_idx == 0:
                     st.session_state.aktualny_strzal -= 1
                     st.session_state.aktualny_zawodnik_idx = (
@@ -838,7 +841,6 @@ elif st.session_state.tryb_pracy == "OS_STRZELECKA":
                     st.session_state.aktualny_strzal
                 ] = "-"
 
-                # Nadpisanie cofniętego strzału w pliku Excel
                 try:
                     df_aktualny = wczytaj_excel_lokalny(AKTYWNY_EXCEL_PATH)
                     df_po_zapisie = zapisz_wyniki_zmiany_do_df(df_aktualny)
