@@ -642,13 +642,13 @@ def zapisz_wyniki_zmiany(path: Path) -> None:
 
     zapisz_excel(df, path)
 
-
 def zakoncz_i_wroc_do_menu():
     st.session_state.tryb_pracy = "MENU"
     st.session_state.wybrani_zawodnicy = []
     st.session_state.macierz_wynikow = {}
     st.session_state.aktualny_strzal = 0
     st.session_state.aktualny_zawodnik_idx = 0
+    st.session_state.zapisano_zmiane = ""
 
 
 # ============================================================
