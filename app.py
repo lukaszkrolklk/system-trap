@@ -670,7 +670,7 @@ KODY_LIST = {
 
 kod_listy = st.sidebar.text_input(
     "Kod listy klubowej:",
-    placeholder="np. snajper",
+    placeholder="np. Ala ma kota a kot ma strzelbę ;)",
 ).strip().lower()
 
 uzyj_wlasnego_linku = st.sidebar.checkbox("Użyj własnego linku Google Sheets")
