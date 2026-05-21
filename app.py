@@ -498,9 +498,10 @@ wlasny_link = ""
 
 if uzyj_wlasnego_linku:
     wlasny_link = st.sidebar.text_input(
-        "Publiczny link Google Sheets do odczytu:",
-        value=st.session_state.google_link,
-        placeholder="https://docs.google.com/spreadsheets/d/...",
+        "Publiczny link Google Sheets:",
+        value="",
+        placeholder="https://docs.google.com/...",
+        key="custom_google_link"
     ).strip()
 
 if st.sidebar.button("📥 Utwórz NOWY plik zawodów", use_container_width=True):
