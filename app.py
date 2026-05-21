@@ -751,6 +751,22 @@ if pliki:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,
     )
+
+    st.sidebar.markdown("---")
+
+    if st.sidebar.button("🗑️ Usuń aktywny plik zawodów", use_container_width=True):
+        try:
+            if wybrany_path.exists():
+                wybrany_path.unlink()
+
+            st.session_state.aktywny_plik = ""
+            zakoncz_i_wroc_do_menu()
+
+            st.sidebar.success("Usunięto aktywny plik zawodów.")
+            st.rerun()
+
+        except Exception as e:
+            st.sidebar.error(f"Nie udało się usunąć pliku: {e}")
 else:
     st.sidebar.warning("Brak pliku zawodów. Pobierz listę z Google.")
 
