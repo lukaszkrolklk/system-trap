@@ -1,6 +1,4 @@
-from pathlib import Path
 
-code = r'''
 import re
 from io import BytesIO
 from pathlib import Path
@@ -818,8 +816,3 @@ elif st.session_state.tryb_pracy == "OS_STRZELECKA":
 
                 st.session_state.macierz_wynikow[id_u][st.session_state.aktualny_strzal] = "-"
                 st.rerun()
-'''
-
-path = Path("/mnt/data/trap20_streamlit_lokalny_excel.py")
-path.write_text(code, encoding="utf-8")
-path
