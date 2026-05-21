@@ -102,10 +102,11 @@ st.markdown(
         outline-offset: 1px;
     }
 
-    /* Kompaktowy wiersz zawodnika */
+    /* Kompaktowy wiersz zawodnika (Komputer) */
     .player-row {
         display: grid;
-        grid-template-columns: 76px 160px minmax(300px, 1fr) 84px;
+        /* Zwężono pierwszą kolumnę z 76px na 45px */
+        grid-template-columns: 45px 160px minmax(300px, 1fr) 84px;
         align-items: center;
         column-gap: 8px;
         padding: 4px 0;
@@ -121,13 +122,16 @@ st.markdown(
     .player-name {
         font-weight: 900;
         font-size: 14px;
-        line-height: 1.15;
+        line-height: 1.2;
+        /* Pozwolenie na zawijanie długich nazwisk */
+        white-space: normal; 
+        word-wrap: break-word;
     }
 
     .player-type {
         color: #94a3b8;
         font-size: 12px;
-        margin-top: 3px;
+        margin-top: 1px;
     }
 
     .player-shots {
@@ -193,7 +197,8 @@ st.markdown(
         }
 
         .player-row {
-            grid-template-columns: 56px 124px minmax(235px, 1fr) 62px;
+            /* Zwężono pierwszą kolumnę z 56px na 38px */
+            grid-template-columns: 38px 124px minmax(235px, 1fr) 62px;
             column-gap: 5px;
             padding: 3px 0;
         }
@@ -204,6 +209,7 @@ st.markdown(
 
         .player-name {
             font-size: 12px;
+            white-space: normal;
         }
 
         .player-type {
@@ -243,31 +249,44 @@ st.markdown(
         }
     }
 
-    /* Telefon pionowo */
+    /* Telefon pionowo (NAJWAŻNIEJSZE ZMIANY) */
     @media (max-width: 620px) {
         .player-row {
-            grid-template-columns: 50px 1fr 58px;
+            /* Pierwsza kolumna na stanowisko (S 1) zwężona z 50px do 32px */
+            grid-template-columns: 32px 1fr 58px;
             row-gap: 2px;
+        }
+
+        .player-stand {
+            font-size: 12px;
+        }
+
+        .player-name {
+            font-size: 13px;
+            white-space: normal; /* Pozwala na ALICJA [następna linia] PIENIĘŻNIK */
+            line-height: 1.2;
         }
 
         .player-shots {
             grid-column: 1 / 4;
-            line-height: 26px;
+            line-height: 28px;
+            padding-top: 2px;
         }
 
         .shot-box {
-            width: 23px;
-            height: 23px;
-            line-height: 21px;
+            width: 24px;
+            height: 24px;
+            line-height: 22px;
             font-size: 11px;
-        }
-
-        .player-name {
-            font-size: 12px;
         }
 
         .player-sum {
             font-size: 12px;
+        }
+        
+        /* Poprawka dla mobilnego wyszukiwania - zapobiega ucinaniu kliknięć w selectboxy */
+        div[data-baseweb="select"] {
+            z-index: 999;
         }
     }
 </style>
