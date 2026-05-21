@@ -1,27 +1,27 @@
 
 import re
-from io import BytesIO
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
 
-# ==================================================
+# ============================================================
 # KONFIGURACJA
-# ==================================================
+# ============================================================
+
 st.set_page_config(
-    page_title="System Punktacji TRAP20",
+    page_title="TRAP20 — System Punktacji",
     page_icon="🎯",
-    layout="wide"
+    layout="wide",
 )
 
 APP_DIR = Path(__file__).parent
 DATA_DIR = APP_DIR / "data"
 DATA_DIR.mkdir(exist_ok=True)
 
-LOCAL_EXCEL_PATH = DATA_DIR / "lista_trap_lokalna.xlsx"
-
+MAX_RZUTKOW = 25
 WYMAGANE_KOLUMNY = [
     "Nazwisko",
     "Zmiana",
@@ -31,29 +31,27 @@ WYMAGANE_KOLUMNY = [
     "Ile za pierwszym",
 ]
 
-KOLORY = {
-    "/": "shot-t1",
-    "X": "shot-t2",
-    "O": "shot-miss",
-    "-": "shot-blank",
-}
+KOLUMNY_STRZALOW = [f"Strzał_{i}" for i in range(1, MAX_RZUTKOW + 1)]
+ARKUSZ_WYNIKI = "Wyniki Szczegółowe"
+ARKUSZ_REZULTATY = "Rezultaty"
+ARKUSZ_REZULTATY_PK = "Rezultaty PK"
 
 
-# ==================================================
-# CSS
-# ==================================================
+# ============================================================
+# STYL
+# ============================================================
+
 st.markdown(
     """
 <style>
     .main-title {
         font-size: 34px;
-        font-weight: 800;
-        margin-bottom: 4px;
+        font-weight: 900;
+        margin-bottom: 2px;
     }
-    .subtle {
+    .subtitle {
         color: #64748b;
-        font-size: 14px;
-        margin-bottom: 16px;
+        margin-bottom: 18px;
     }
     .shot-box {
         display: inline-block;
@@ -63,7 +61,7 @@ st.markdown(
         text-align: center;
         margin: 2px;
         border-radius: 7px;
-        font-weight: 800;
+        font-weight: 900;
         color: white;
         border: 1px solid #cbd5e1;
         font-size: 16px;
@@ -92,28 +90,26 @@ st.markdown(
         border-radius: 12px;
         margin: 12px 0 16px 0;
     }
-    .card {
-        border: 1px solid #e2e8f0;
-        border-radius: 12px;
-        padding: 14px;
-        margin-bottom: 10px;
-        background: #ffffff;
-    }
 </style>
 """,
     unsafe_allow_html=True,
 )
 
 
-# ==================================================
-# FUNKCJE GOOGLE SHEETS / EXCEL
-# ==================================================
+# ============================================================
+# FUNKCJE PLIKÓW I DANYCH
+# ============================================================
+
+def lista_plikow_zawodow() -> list[Path]:
+    return sorted(DATA_DIR.glob("trap20_zawody_*.xlsx"), reverse=True)
+
+
+def nazwa_nowego_pliku() -> Path:
+    znacznik = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return DATA_DIR / f"trap20_zawody_{znacznik}.xlsx"
+
+
 def google_link_do_csv_url(link: str) -> str:
-    """
-    Zamienia publiczny link Google Sheets na link eksportu CSV.
-    Obsługuje format:
-    https://docs.google.com/spreadsheets/d/ID/edit#gid=0
-    """
     link = str(link).strip()
 
     if "export?format=csv" in link or "output=csv" in link:
@@ -136,8 +132,9 @@ def normalizuj_naglowki(df: pd.DataFrame) -> pd.DataFrame:
     df.columns = [str(c).strip() for c in df.columns]
 
     mapa = {}
+
     for col in df.columns:
-        c = col.lower()
+        c = str(col).strip().lower()
 
         if c in ["nazwisko", "nazwisko i imię", "nazwisko i imie", "zawodnik"]:
             mapa[col] = "Nazwisko"
@@ -158,69 +155,40 @@ def normalizuj_naglowki(df: pd.DataFrame) -> pd.DataFrame:
         if col not in df.columns:
             df[col] = ""
 
-    for i in range(1, 26):
-        col = f"Strzał_{i}"
+    for col in KOLUMNY_STRZALOW:
         if col not in df.columns:
             df[col] = ""
 
-    df["Nazwisko"] = df["Nazwisko"].fillna("").astype(str).str.strip().str.upper()
-    df["Zmiana"] = df["Zmiana"].fillna("").astype(str).str.strip()
-    df["Typ"] = df["Typ"].fillna("").astype(str).str.strip()
-    df["Status"] = df["Status"].fillna("").astype(str).str.strip()
-    df["Suma trafień"] = df["Suma trafień"].fillna("").astype(str).str.strip()
-    df["Ile za pierwszym"] = df["Ile za pierwszym"].fillna("").astype(str).str.strip()
+    # Wszystko jako tekst. To usuwa problem dtype str/int w Streamlit Cloud.
+    for col in df.columns:
+        df[col] = df[col].fillna("").astype(str)
+
+    df["Nazwisko"] = df["Nazwisko"].str.strip().str.upper()
+    df["Zmiana"] = df["Zmiana"].str.strip()
+    df["Typ"] = df["Typ"].str.strip()
+    df["Status"] = df["Status"].str.strip()
+    df["Suma trafień"] = df["Suma trafień"].str.strip()
+    df["Ile za pierwszym"] = df["Ile za pierwszym"].str.strip()
 
     df = df[df["Nazwisko"] != ""].copy()
 
-    return df
+    # kolejność ważnych kolumn na początku
+    pozostale = [c for c in df.columns if c not in WYMAGANE_KOLUMNY + KOLUMNY_STRZALOW]
+    return df[WYMAGANE_KOLUMNY + KOLUMNY_STRZALOW + pozostale]
 
 
 def pobierz_liste_z_google(link: str) -> pd.DataFrame:
     csv_url = google_link_do_csv_url(link)
-    df = pd.read_csv(csv_url)
+    df = pd.read_csv(csv_url, dtype=str)
     return normalizuj_naglowki(df)
 
 
-def zapisz_excel_lokalny(df: pd.DataFrame, path: Path = LOCAL_EXCEL_PATH) -> None:
-    df = normalizuj_naglowki(df)
-    tabela_standard = zbuduj_ranking(df, "Standard")
-    tabela_pk = zbuduj_ranking(df, "PK")
-
-    with pd.ExcelWriter(path, engine="openpyxl") as writer:
-        df.to_excel(writer, sheet_name="Wyniki Szczegółowe", index=False)
-        tabela_standard.to_excel(writer, sheet_name="Rezultaty", index=False)
-        tabela_pk.to_excel(writer, sheet_name="Rezultaty PK", index=False)
-
-
-def wczytaj_excel_lokalny(path: Path = LOCAL_EXCEL_PATH) -> pd.DataFrame:
-    if not path.exists():
-        return pd.DataFrame(columns=WYMAGANE_KOLUMNY)
-
-    try:
-        df = pd.read_excel(path, sheet_name="Wyniki Szczegółowe")
-    except Exception:
-        df = pd.read_excel(path, sheet_name=0)
-
-    return normalizuj_naglowki(df)
-
-
-def excel_do_pobrania(path: Path = LOCAL_EXCEL_PATH) -> bytes:
-    if not path.exists():
-        df = pd.DataFrame(columns=WYMAGANE_KOLUMNY)
-        zapisz_excel_lokalny(df, path)
-
-    return path.read_bytes()
-
-
-# ==================================================
-# LOGIKA STATUSÓW I RANKINGÓW
-# ==================================================
 def czy_ma_wynik(wartosc) -> bool:
     txt = str(wartosc).strip().lower()
     return txt not in ["", "nan", "none"]
 
 
-def wykryj_typ_zawodnika(df: pd.DataFrame, nazwisko: str, idx: int) -> str:
+def wykryj_typ_zawodnika(df: pd.DataFrame, nazwisko: str, idx) -> str:
     typ = str(df.at[idx, "Typ"]).strip()
 
     if typ in ["Standard", "PK"]:
@@ -232,87 +200,35 @@ def wykryj_typ_zawodnika(df: pd.DataFrame, nazwisko: str, idx: int) -> str:
     return "Standard" if pozycja == 0 else "PK"
 
 
-def zbuduj_liste_dostepnych(df: pd.DataFrame) -> list[dict]:
-    dostepni = []
-
-    for nazwisko in sorted(df["Nazwisko"].dropna().astype(str).str.strip().unique()):
-        if not nazwisko:
-            continue
-
-        wiersze = df[df["Nazwisko"] == nazwisko]
-        standard_zrobiony = False
-        pk_zrobiony = False
-        standard_wolny = False
-        pk_wolny = False
-
-        for idx in wiersze.index:
-            typ = wykryj_typ_zawodnika(df, nazwisko, idx)
-            suma = df.at[idx, "Suma trafień"]
-            ma_wynik = czy_ma_wynik(suma)
-
-            if typ == "Standard":
-                if ma_wynik:
-                    standard_zrobiony = True
-                else:
-                    standard_wolny = True
-
-            if typ == "PK":
-                if ma_wynik:
-                    pk_zrobiony = True
-                else:
-                    pk_wolny = True
-
-        if standard_wolny and not standard_zrobiony:
-            dostepni.append({
-                "wyswietl": nazwisko,
-                "nazwisko": nazwisko,
-                "typ": "Standard",
-            })
-
-        if standard_zrobiony and pk_wolny and not pk_zrobiony:
-            dostepni.append({
-                "wyswietl": f"{nazwisko} [PK]",
-                "nazwisko": nazwisko,
-                "typ": "PK",
-            })
-
-    return dostepni
-
-
 def zbuduj_ranking(df_input: pd.DataFrame, typ: str) -> pd.DataFrame:
+    kolumny = [
+        "Miejsce",
+        "Nazwisko i Imię",
+        "Typ startu",
+        "Grupa / Zmiana",
+        "Suma Trafień (Wynik)",
+        "Trafienia z 1. Strzału",
+    ]
+
     if df_input.empty:
-        return pd.DataFrame(columns=[
-            "Miejsce",
-            "Nazwisko i Imię",
-            "Typ startu",
-            "Grupa / Zmiana",
-            "Suma Trafień (Wynik)",
-            "Trafienia z 1. Strzału",
-        ])
+        return pd.DataFrame(columns=kolumny)
 
     df = normalizuj_naglowki(df_input)
 
-    df["Suma trafień num"] = pd.to_numeric(df["Suma trafień"], errors="coerce")
-    df["Ile za pierwszym num"] = pd.to_numeric(df["Ile za pierwszym"], errors="coerce").fillna(0)
+    df["Suma_num"] = pd.to_numeric(df["Suma trafień"], errors="coerce")
+    df["Pierwszy_num"] = pd.to_numeric(df["Ile za pierwszym"], errors="coerce").fillna(0)
 
     df = df[
         (df["Typ"] == typ)
-        & (df["Suma trafień num"].notna())
-        & (df["Zmiana"].astype(str).str.strip() != "")
+        & (df["Zmiana"].str.strip() != "")
+        & (df["Suma_num"].notna())
     ].copy()
 
     if df.empty:
-        return pd.DataFrame(columns=[
-            "Miejsce",
-            "Nazwisko i Imię",
-            "Typ startu",
-            "Grupa / Zmiana",
-            "Suma Trafień (Wynik)",
-            "Trafienia z 1. Strzału",
-        ])
+        return pd.DataFrame(columns=kolumny)
 
     df = df.sort_values(
-        by=["Suma trafień num", "Ile za pierwszym num", "Nazwisko"],
+        by=["Suma_num", "Pierwszy_num", "Nazwisko"],
         ascending=[False, False, True],
     )
 
@@ -321,8 +237,8 @@ def zbuduj_ranking(df_input: pd.DataFrame, typ: str) -> pd.DataFrame:
     poprzedni_pierwszy = None
 
     for i, (_, row) in enumerate(df.iterrows()):
-        wynik = row["Suma trafień num"]
-        pierwszy = row["Ile za pierwszym num"]
+        wynik = row["Suma_num"]
+        pierwszy = row["Pierwszy_num"]
 
         if i == 0:
             miejsce = 1
@@ -340,13 +256,53 @@ def zbuduj_ranking(df_input: pd.DataFrame, typ: str) -> pd.DataFrame:
         "Nazwisko i Imię": df["Nazwisko"].values,
         "Typ startu": df["Typ"].values,
         "Grupa / Zmiana": df["Zmiana"].values,
-        "Suma Trafień (Wynik)": df["Suma trafień num"].astype(int).values,
-        "Trafienia z 1. Strzału": df["Ile za pierwszym num"].astype(int).values,
+        "Suma Trafień (Wynik)": df["Suma_num"].astype(int).values,
+        "Trafienia z 1. Strzału": df["Pierwszy_num"].astype(int).values,
     })
 
 
+def zapisz_excel(df: pd.DataFrame, path: Path) -> None:
+    df = normalizuj_naglowki(df)
+
+    ranking_standard = zbuduj_ranking(df, "Standard")
+    ranking_pk = zbuduj_ranking(df, "PK")
+
+    with pd.ExcelWriter(path, engine="openpyxl") as writer:
+        df.to_excel(writer, sheet_name=ARKUSZ_WYNIKI, index=False)
+        ranking_standard.to_excel(writer, sheet_name=ARKUSZ_REZULTATY, index=False)
+        ranking_pk.to_excel(writer, sheet_name=ARKUSZ_REZULTATY_PK, index=False)
+
+
+def wczytaj_excel(path: Path) -> pd.DataFrame:
+    if not path.exists():
+        return pd.DataFrame(columns=WYMAGANE_KOLUMNY + KOLUMNY_STRZALOW)
+
+    try:
+        df = pd.read_excel(path, sheet_name=ARKUSZ_WYNIKI, dtype=str)
+    except Exception:
+        df = pd.read_excel(path, sheet_name=0, dtype=str)
+
+    return normalizuj_naglowki(df)
+
+
+def aktywny_path() -> Path | None:
+    val = st.session_state.get("aktywny_plik", "")
+
+    if val:
+        path = Path(val)
+        if path.exists():
+            return path
+
+    pliki = lista_plikow_zawodow()
+    if pliki:
+        st.session_state.aktywny_plik = str(pliki[0])
+        return pliki[0]
+
+    return None
+
+
 def kolejny_numer_zmiany(df: pd.DataFrame) -> int:
-    max_nr = 0
+    maks = 0
 
     if "Zmiana" not in df.columns:
         return 1
@@ -355,105 +311,173 @@ def kolejny_numer_zmiany(df: pd.DataFrame) -> int:
         if "Zmiana" in zm:
             try:
                 nr = int(zm.replace("Zmiana", "").strip())
-                max_nr = max(max_nr, nr)
+                maks = max(maks, nr)
             except ValueError:
                 pass
 
-    return max_nr + 1
+    return maks + 1
 
 
-def zapisz_wyniki_zmiany_do_df(df_baza: pd.DataFrame) -> pd.DataFrame:
-    df = normalizuj_naglowki(df_baza)
+def statusy_zawodnika(df: pd.DataFrame, nazwisko: str) -> tuple[bool, bool]:
+    wiersze = df[df["Nazwisko"] == nazwisko]
+    standard_zrobiony = False
+    pk_zrobiony = False
 
-    limit = st.session_state.limit_rzutkow
+    for idx in wiersze.index:
+        typ = wykryj_typ_zawodnika(df, nazwisko, idx)
+        suma = df.at[idx, "Suma trafień"]
 
-    for i in range(1, limit + 1):
-        col = f"Strzał_{i}"
-        if col not in df.columns:
-            df[col] = ""
+        if typ == "Standard" and czy_ma_wynik(suma):
+            standard_zrobiony = True
+        if typ == "PK" and czy_ma_wynik(suma):
+            pk_zrobiony = True
+
+    return standard_zrobiony, pk_zrobiony
+
+
+def zbuduj_liste_dostepnych(df: pd.DataFrame) -> list[dict]:
+    wynik = []
+
+    for nazwisko in sorted(df["Nazwisko"].dropna().astype(str).str.strip().unique()):
+        if not nazwisko:
+            continue
+
+        standard_zrobiony, pk_zrobiony = statusy_zawodnika(df, nazwisko)
+
+        if not standard_zrobiony:
+            wynik.append({
+                "wyswietl": nazwisko,
+                "nazwisko": nazwisko,
+                "typ": "Standard",
+            })
+
+        if standard_zrobiony and not pk_zrobiony:
+            wynik.append({
+                "wyswietl": f"{nazwisko} [PK]",
+                "nazwisko": nazwisko,
+                "typ": "PK",
+            })
+
+    return wynik
+
+
+def zapisz_pusty_start_zmiany(path: Path) -> None:
+    """
+    Od razu po rozpoczęciu zmiany rezerwuje w aktywnym Excelu informację,
+    kto strzela w tej zmianie. Dzięki temu plik zawodów od razu jest bazą roboczą.
+    """
+    df = wczytaj_excel(path)
 
     for zaw in st.session_state.wybrani_zawodnicy:
-        nazwisko = zaw["nazwisko"].upper()
-        typ_startu = zaw["typ"]
-        id_u = zaw["id_unikalne"]
-        strzaly = st.session_state.macierz_wynikow[id_u]
+        nazwisko = zaw["nazwisko"]
+        typ = zaw["typ"]
 
-        suma_laczna = sum(1 for s in strzaly if s in ["/", "X"])
-        suma_pierwszy = sum(1 for s in strzaly if s == "/")
+        maska = (
+            (df["Nazwisko"] == nazwisko)
+            & (df["Typ"] == typ)
+            & (df["Zmiana"] == st.session_state.nazwa_zmiany)
+        )
+
+        if maska.any():
+            continue
 
         indeksy = df[df["Nazwisko"] == nazwisko].index.tolist()
-        wybrany_idx = None
+        pusty_idx = None
 
         for idx in indeksy:
-            obecny_typ = wykryj_typ_zawodnika(df, nazwisko, idx)
-            obecna_zmiana = str(df.at[idx, "Zmiana"]).strip()
-            obecna_suma = str(df.at[idx, "Suma trafień"]).strip().lower()
-
-            pusty_wiersz = obecna_zmiana in ["", "nan", "none"] or obecna_suma in ["", "nan", "none"]
-
-            if pusty_wiersz and obecny_typ == typ_startu:
-                wybrany_idx = idx
+            typ_wiersza = wykryj_typ_zawodnika(df, nazwisko, idx)
+            if typ_wiersza == typ and not czy_ma_wynik(df.at[idx, "Suma trafień"]):
+                pusty_idx = idx
                 break
 
-        if wybrany_idx is None:
-            nowy = {
-                "Nazwisko": nazwisko,
-                "Zmiana": st.session_state.nazwa_zmiany,
-                "Typ": typ_startu,
-                "Status": "ZAKOŃCZONY" if typ_startu == "Standard" else "PK ZAKOŃCZONE",
-                "Suma trafień": int(suma_laczna),
-                "Ile za pierwszym": int(suma_pierwszy),
-            }
-
-            for i, sym in enumerate(strzaly, start=1):
-                nowy[f"Strzał_{i}"] = sym
-
-            df = pd.concat([df, pd.DataFrame([nowy])], ignore_index=True)
+        if pusty_idx is not None:
+            df.at[pusty_idx, "Zmiana"] = st.session_state.nazwa_zmiany
+            df.at[pusty_idx, "Typ"] = typ
+            df.at[pusty_idx, "Status"] = "W TRAKCIE"
         else:
-            df.at[wybrany_idx, "Zmiana"] = st.session_state.nazwa_zmiany
-            df.at[wybrany_idx, "Typ"] = typ_startu
-            df.at[wybrany_idx, "Status"] = "ZAKOŃCZONY" if typ_startu == "Standard" else "PK ZAKOŃCZONE"
-            df.at[wybrany_idx, "Suma trafień"] = int(suma_laczna)
-            df.at[wybrany_idx, "Ile za pierwszym"] = int(suma_pierwszy)
+            nowy = {col: "" for col in WYMAGANE_KOLUMNY + KOLUMNY_STRZALOW}
+            nowy["Nazwisko"] = nazwisko
+            nowy["Zmiana"] = st.session_state.nazwa_zmiany
+            nowy["Typ"] = typ
+            nowy["Status"] = "W TRAKCIE"
+            df = pd.concat([df, pd.DataFrame([nowy])], ignore_index=True)
 
-            for i, sym in enumerate(strzaly, start=1):
-                df.at[wybrany_idx, f"Strzał_{i}"] = sym
-
-    return normalizuj_naglowki(df)
+    zapisz_excel(df, path)
 
 
-# ==================================================
+def zapisz_wyniki_zmiany(path: Path) -> None:
+    df = wczytaj_excel(path)
+
+    for zaw in st.session_state.wybrani_zawodnicy:
+        nazwisko = zaw["nazwisko"]
+        typ = zaw["typ"]
+        id_u = zaw["id_unikalne"]
+
+        strzaly = st.session_state.macierz_wynikow.get(id_u, [])
+        suma = str(sum(1 for s in strzaly if s in ["/", "X"]))
+        pierwszy = str(sum(1 for s in strzaly if s == "/"))
+
+        maska = (
+            (df["Nazwisko"] == nazwisko)
+            & (df["Typ"] == typ)
+            & (df["Zmiana"] == st.session_state.nazwa_zmiany)
+        )
+
+        if maska.any():
+            idx = df[maska].index[0]
+        else:
+            nowy = {col: "" for col in WYMAGANE_KOLUMNY + KOLUMNY_STRZALOW}
+            nowy["Nazwisko"] = nazwisko
+            nowy["Zmiana"] = st.session_state.nazwa_zmiany
+            nowy["Typ"] = typ
+            df = pd.concat([df, pd.DataFrame([nowy])], ignore_index=True)
+            idx = df.index[-1]
+
+        df.at[idx, "Status"] = "STANDARD ZAKOŃCZONY" if typ == "Standard" else "PK ZAKOŃCZONE"
+        df.at[idx, "Suma trafień"] = suma
+        df.at[idx, "Ile za pierwszym"] = pierwszy
+
+        for i in range(1, MAX_RZUTKOW + 1):
+            col = f"Strzał_{i}"
+            df.at[idx, col] = strzaly[i - 1] if i <= len(strzaly) else ""
+
+    zapisz_excel(df, path)
+
+
+def zakoncz_i_wroc_do_menu():
+    st.session_state.tryb_pracy = "MENU"
+    st.session_state.wybrani_zawodnicy = []
+    st.session_state.macierz_wynikow = {}
+    st.session_state.aktualny_strzal = 0
+    st.session_state.aktualny_zawodnik_idx = 0
+
+
+# ============================================================
 # SESSION STATE
-# ==================================================
-def init_state():
-    defaults = {
-        "tryb_pracy": "MENU_START",
-        "wybrani_zawodnicy": [],
-        "aktualny_strzal": 0,
-        "aktualny_zawodnik_idx": 0,
-        "macierz_wynikow": {},
-        "limit_rzutkow": 20,
-        "nazwa_zmiany": "",
-        "google_link": "",
-    }
+# ============================================================
 
-    for key, value in defaults.items():
-        if key not in st.session_state:
-            st.session_state[key] = value
+defaults = {
+    "tryb_pracy": "MENU",
+    "aktywny_plik": "",
+    "google_link": "",
+    "wybrani_zawodnicy": [],
+    "macierz_wynikow": {},
+    "aktualny_strzal": 0,
+    "aktualny_zawodnik_idx": 0,
+    "limit_rzutkow": 20,
+    "nazwa_zmiany": "",
+}
 
-
-init_state()
+for k, v in defaults.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
 
 
-# ==================================================
-# SIDEBAR — ŹRÓDŁO DANYCH
-# ==================================================
-st.sidebar.header("📁 Baza zawodników")
+# ============================================================
+# SIDEBAR
+# ============================================================
 
-st.sidebar.info(
-    "Google Sheets służy tylko do pobrania listy startowej. "
-    "Wyniki i rankingi są zapisywane lokalnie do pliku Excel."
-)
+st.sidebar.header("📁 Plik zawodów")
 
 st.session_state.google_link = st.sidebar.text_input(
     "Publiczny link Google Sheets do odczytu:",
@@ -461,76 +485,85 @@ st.session_state.google_link = st.sidebar.text_input(
     placeholder="https://docs.google.com/spreadsheets/d/...",
 )
 
-col_sb1, col_sb2 = st.sidebar.columns(2)
+if st.sidebar.button("📥 Pobierz listę z Google i utwórz NOWY plik zawodów", use_container_width=True):
+    if not st.session_state.google_link.strip():
+        st.sidebar.error("Wklej link do arkusza Google.")
+    else:
+        try:
+            df_google = pobierz_liste_z_google(st.session_state.google_link)
+            nowy_plik = nazwa_nowego_pliku()
+            zapisz_excel(df_google, nowy_plik)
 
-with col_sb1:
-    if st.button("📥 Pobierz z Google", use_container_width=True):
-        if not st.session_state.google_link.strip():
-            st.sidebar.error("Wklej link do arkusza Google.")
-        else:
-            try:
-                df_google = pobierz_liste_z_google(st.session_state.google_link)
-                zapisz_excel_lokalny(df_google)
-                st.session_state.wybrani_zawodnicy = []
-                st.session_state.tryb_pracy = "MENU_START"
-                st.sidebar.success("Pobrano listę i utworzono lokalny Excel.")
-                st.rerun()
-            except Exception as e:
-                st.sidebar.error(f"Nie udało się pobrać arkusza: {e}")
+            st.session_state.aktywny_plik = str(nowy_plik)
+            zakoncz_i_wroc_do_menu()
 
-with col_sb2:
-    if st.button("🔄 Odśwież lokalny", use_container_width=True):
+            st.sidebar.success(f"Utworzono plik: {nowy_plik.name}")
+            st.rerun()
+        except Exception as e:
+            st.sidebar.error(f"Nie udało się pobrać danych z Google: {e}")
+
+pliki = lista_plikow_zawodow()
+
+if pliki:
+    nazwy = [p.name for p in pliki]
+
+    aktualny = aktywny_path()
+    aktualna_nazwa = aktualny.name if aktualny else nazwy[0]
+    index = nazwy.index(aktualna_nazwa) if aktualna_nazwa in nazwy else 0
+
+    wybor_pliku = st.sidebar.selectbox(
+        "Aktywny plik zawodów:",
+        nazwy,
+        index=index,
+    )
+
+    wybrany_path = DATA_DIR / wybor_pliku
+
+    if str(wybrany_path) != st.session_state.aktywny_plik:
+        st.session_state.aktywny_plik = str(wybrany_path)
+        zakoncz_i_wroc_do_menu()
         st.rerun()
 
-uploaded = st.sidebar.file_uploader(
-    "Lub wgraj lokalny Excel:",
-    type=["xlsx"],
-)
-
-if uploaded is not None:
-    try:
-        df_upload = pd.read_excel(uploaded, sheet_name=0)
-        zapisz_excel_lokalny(df_upload)
-        st.sidebar.success("Wgrano Excel jako lokalną bazę.")
-        st.rerun()
-    except Exception as e:
-        st.sidebar.error(f"Nie udało się wczytać Excela: {e}")
-
-if LOCAL_EXCEL_PATH.exists():
     st.sidebar.download_button(
-        "⬇️ Pobierz aktualny Excel",
-        data=excel_do_pobrania(),
-        file_name="lista_trap_wyniki.xlsx",
+        "⬇️ Pobierz aktywny Excel",
+        data=wybrany_path.read_bytes(),
+        file_name=wybrany_path.name,
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,
     )
 else:
-    st.sidebar.warning("Brak lokalnej bazy. Pobierz listę z Google albo wgraj Excel.")
+    st.sidebar.warning("Brak pliku zawodów. Pobierz listę z Google.")
 
 
-# ==================================================
-# WIDOK GŁÓWNY
-# ==================================================
-st.markdown('<div class="main-title">🎯 System Punktacji TRAP20</div>', unsafe_allow_html=True)
+# ============================================================
+# GŁÓWNY WIDOK
+# ============================================================
+
+st.markdown('<div class="main-title">🎯 TRAP20 — System Punktacji</div>', unsafe_allow_html=True)
 st.markdown(
-    '<div class="subtle">Wersja Streamlit: pobranie listy z Google Sheets, lokalny zapis do Excela, automatyczne rankingi.</div>',
+    '<div class="subtitle">Google służy tylko do pobrania listy. Cała praca odbywa się na aktywnym pliku Excel zawodów.</div>',
     unsafe_allow_html=True,
 )
 
-df_baza = wczytaj_excel_lokalny()
+path = aktywny_path()
 
-if df_baza.empty:
-    st.warning("Najpierw pobierz listę zawodników z Google Sheets albo wgraj plik Excel w panelu bocznym.")
+if path is None:
+    st.warning("Najpierw pobierz listę z Google i utwórz plik zawodów.")
     st.stop()
 
+df_baza = wczytaj_excel(path)
 
-# ==================================================
+st.caption(f"Aktywny plik: `{path.name}`")
+
+
+# ============================================================
 # MENU STARTOWE
-# ==================================================
-if st.session_state.tryb_pracy == "MENU_START":
-    col_cfg1, col_cfg2, col_cfg3 = st.columns([1, 1, 2])
+# ============================================================
 
-    with col_cfg1:
+if st.session_state.tryb_pracy == "MENU":
+    col_m1, col_m2, col_m3 = st.columns(3)
+
+    with col_m1:
         nr_zmiany = st.number_input(
             "Numer zmiany:",
             min_value=1,
@@ -538,40 +571,33 @@ if st.session_state.tryb_pracy == "MENU_START":
             step=1,
         )
 
-    with col_cfg2:
-        limit_rzutkow = st.selectbox(
-            "Liczba rzutków:",
-            [10, 15, 20, 25],
-            index=2,
-        )
+    with col_m2:
+        limit_rzutkow = st.selectbox("Liczba rzutków:", [10, 15, 20, 25], index=2)
 
-    with col_cfg3:
-        st.metric("Liczba zawodników w bazie", df_baza["Nazwisko"].nunique())
+    with col_m3:
+        st.metric("Zawodnicy w pliku", df_baza["Nazwisko"].nunique())
 
     st.markdown("---")
-    st.subheader("📋 Budowanie składu zmiany")
+    st.subheader("📋 Skład zmiany")
 
     dostepni = zbuduj_liste_dostepnych(df_baza)
     juz_dodani = [z["id_unikalne"] for z in st.session_state.wybrani_zawodnicy]
     opcje = [z["wyswietl"] for z in dostepni if z["wyswietl"] not in juz_dodani]
 
-    col1, col2, col3 = st.columns([3, 3, 2])
+    col1, col2, col3 = st.columns([4, 3, 2])
 
     with col1:
-        wybor = st.selectbox(
-            "Wybierz zawodnika z bazy:",
-            [""] + opcje,
-        )
+        wybor = st.selectbox("Wybierz zawodnika z aktywnego pliku:", [""] + opcje)
 
     with col2:
-        reczny = st.text_input("Lub dopisz ręcznie:").strip().upper()
+        reczny = st.text_input("Dopisz ręcznie:", "").strip().upper()
 
     with col3:
-        typ_reczny = st.selectbox("Typ startu:", ["Standard", "PK"])
+        typ_reczny = st.selectbox("Typ:", ["Standard", "PK"])
 
-    if st.button("➕ Dodaj do zmiany", type="primary"):
+    if st.button("➕ Dodaj zawodnika", type="primary"):
         if len(st.session_state.wybrani_zawodnicy) >= 6:
-            st.error("W zmianie może być maksymalnie 6 zawodników.")
+            st.error("W jednej zmianie może być maksymalnie 6 zawodników.")
         else:
             nazwisko = ""
             typ = ""
@@ -588,60 +614,68 @@ if st.session_state.tryb_pracy == "MENU_START":
             if not nazwisko:
                 st.error("Wybierz zawodnika albo wpisz nazwisko ręcznie.")
             else:
-                id_unikalne = f"{nazwisko} [PK]" if typ == "PK" else nazwisko
+                standard_zrobiony, pk_zrobiony = statusy_zawodnika(df_baza, nazwisko)
 
-                if id_unikalne in juz_dodani:
-                    st.error("Ten zawodnik jest już dodany do tej zmiany.")
+                if typ == "Standard" and standard_zrobiony:
+                    st.error(f"{nazwisko} ma już wynik Standard. Może startować tylko jako PK.")
+                elif typ == "PK" and not standard_zrobiony:
+                    st.error(f"{nazwisko} nie ma jeszcze wyniku Standard. PK jest możliwe dopiero po Standardzie.")
+                elif typ == "PK" and pk_zrobiony:
+                    st.error(f"{nazwisko} ma już zapisany wynik PK.")
                 else:
-                    st.session_state.wybrani_zawodnicy.append({
-                        "nazwisko": nazwisko,
-                        "id_unikalne": id_unikalne,
-                        "typ": typ,
-                    })
-                    st.rerun()
+                    id_unikalne = f"{nazwisko} [PK]" if typ == "PK" else nazwisko
+
+                    if id_unikalne in juz_dodani:
+                        st.error("Ten zawodnik jest już dodany do tej zmiany.")
+                    else:
+                        st.session_state.wybrani_zawodnicy.append({
+                            "nazwisko": nazwisko,
+                            "id_unikalne": id_unikalne,
+                            "typ": typ,
+                        })
+                        st.rerun()
 
     if st.session_state.wybrani_zawodnicy:
-        st.markdown("#### Aktualny skład zmiany")
+        st.markdown("#### Wybrani zawodnicy")
 
         for i, z in enumerate(st.session_state.wybrani_zawodnicy):
-            col_z1, col_z2, col_z3 = st.columns([1, 5, 1])
+            c1, c2, c3 = st.columns([1, 5, 1])
 
-            with col_z1:
+            with c1:
                 st.write(f"**Stan. {i + 1}**")
 
-            with col_z2:
+            with c2:
                 st.info(f"{z['id_unikalne']} — {z['typ']}")
 
-            with col_z3:
-                if st.button("Usuń", key=f"usun_{i}"):
+            with c3:
+                if st.button("Usuń", key=f"del_{i}"):
                     st.session_state.wybrani_zawodnicy.pop(i)
                     st.rerun()
 
-        if st.button("🧹 Wyczyść skład"):
-            st.session_state.wybrani_zawodnicy = []
-            st.rerun()
-
     st.markdown("---")
 
-    if st.button("🚀 ROZPOCZNIJ STRZELANIE", type="primary", use_container_width=True):
+    if st.button("🚀 ROZPOCZNIJ ZMIANĘ", type="primary", use_container_width=True):
         if not st.session_state.wybrani_zawodnicy:
             st.error("Nie można rozpocząć bez zawodników.")
         else:
-            st.session_state.tryb_pracy = "OS_STRZELECKA"
-            st.session_state.aktualny_strzal = 0
-            st.session_state.aktualny_zawodnik_idx = 0
+            st.session_state.tryb_pracy = "STRZELANIE"
             st.session_state.limit_rzutkow = int(limit_rzutkow)
             st.session_state.nazwa_zmiany = f"Zmiana {nr_zmiany}"
+            st.session_state.aktualny_strzal = 0
+            st.session_state.aktualny_zawodnik_idx = 0
             st.session_state.macierz_wynikow = {
                 z["id_unikalne"]: ["-"] * int(limit_rzutkow)
                 for z in st.session_state.wybrani_zawodnicy
             }
+
+            # od razu zapisujemy skład zmiany do aktywnego Excela
+            zapisz_pusty_start_zmiany(path)
             st.rerun()
 
     st.markdown("---")
-    st.subheader("📊 Aktualne rankingi")
+    st.subheader("📊 Rankingi z aktywnego pliku")
 
-    tab1, tab2, tab3 = st.tabs(["🏆 Standard", "🎯 PK", "📄 Dane szczegółowe"])
+    tab1, tab2, tab3 = st.tabs(["🏆 Standard", "🎯 PK", "📄 Wyniki szczegółowe"])
 
     with tab1:
         st.dataframe(zbuduj_ranking(df_baza, "Standard"), use_container_width=True, hide_index=True)
@@ -653,63 +687,83 @@ if st.session_state.tryb_pracy == "MENU_START":
         st.dataframe(df_baza, use_container_width=True, hide_index=True)
 
 
-# ==================================================
-# EKRAN STRZELANIA
-# ==================================================
-elif st.session_state.tryb_pracy == "OS_STRZELECKA":
-    st.subheader(
-        f"🏟️ Karta konkurencji — {st.session_state.nazwa_zmiany} — "
-        f"{st.session_state.limit_rzutkow} rzutków"
-    )
+# ============================================================
+# STRZELANIE
+# ============================================================
+
+elif st.session_state.tryb_pracy == "STRZELANIE":
+    limit = int(st.session_state.limit_rzutkow)
+
+    st.subheader(f"🏟️ {st.session_state.nazwa_zmiany} — {limit} rzutków")
 
     for i, z in enumerate(st.session_state.wybrani_zawodnicy):
         id_u = z["id_unikalne"]
-        strzaly = st.session_state.macierz_wynikow[id_u]
+        strzaly = st.session_state.macierz_wynikow.get(id_u, ["-"] * limit)
 
-        suma_laczna = sum(1 for s in strzaly if s in ["/", "X"])
-        suma_pierwszy = sum(1 for s in strzaly if s == "/")
+        suma = sum(1 for s in strzaly if s in ["/", "X"])
+        pierwszy = sum(1 for s in strzaly if s == "/")
 
         html = ""
 
         for s_idx, s in enumerate(strzaly):
-            klasa = KOLORY.get(s, "shot-blank")
+            if s == "/":
+                klasa = "shot-t1"
+            elif s == "X":
+                klasa = "shot-t2"
+            elif s == "O":
+                klasa = "shot-miss"
+            else:
+                klasa = "shot-blank"
 
-            pokaz_symbol = s
+            pokaz = s
+
             if (
-                st.session_state.aktualny_strzal < st.session_state.limit_rzutkow
+                st.session_state.aktualny_strzal < limit
                 and s_idx == st.session_state.aktualny_strzal
                 and i == st.session_state.aktualny_zawodnik_idx
             ):
                 klasa += " current-target"
-                if s == "-":
-                    pokaz_symbol = "●"
+                if pokaz == "-":
+                    pokaz = "●"
 
-            html += f'<span class="shot-box {klasa}">{pokaz_symbol}</span>'
+            html += f'<span class="shot-box {klasa}">{pokaz}</span>'
 
             if (s_idx + 1) % 5 == 0:
                 html += "&nbsp;&nbsp;"
 
-        col_a, col_b, col_c = st.columns([1, 3, 6])
+        c1, c2, c3 = st.columns([1, 3, 6])
 
-        with col_a:
+        with c1:
             st.write(f"**Stan. {i + 1}**")
 
-        with col_b:
+        with c2:
             st.write(f"**{id_u}**")
             st.caption(z["typ"])
 
-        with col_c:
+        with c3:
             st.markdown(
-                f"{html} &nbsp;&nbsp;&nbsp; **Suma: {suma_laczna} / {suma_pierwszy}**",
+                f"{html} &nbsp;&nbsp;&nbsp; **Suma: {suma} / {pierwszy}**",
                 unsafe_allow_html=True,
             )
 
     st.markdown("---")
 
     def rejestruj(symbol: str):
-        id_u = st.session_state.wybrani_zawodnicy[
-            st.session_state.aktualny_zawodnik_idx
-        ]["id_unikalne"]
+        # twarda blokada przed kliknięciami po limicie
+        if st.session_state.aktualny_strzal >= int(st.session_state.limit_rzutkow):
+            return
+
+        if not st.session_state.wybrani_zawodnicy:
+            return
+
+        zawodnik = st.session_state.wybrani_zawodnicy[st.session_state.aktualny_zawodnik_idx]
+        id_u = zawodnik["id_unikalne"]
+
+        if id_u not in st.session_state.macierz_wynikow:
+            st.session_state.macierz_wynikow[id_u] = ["-"] * int(st.session_state.limit_rzutkow)
+
+        if st.session_state.aktualny_strzal >= len(st.session_state.macierz_wynikow[id_u]):
+            return
 
         st.session_state.macierz_wynikow[id_u][st.session_state.aktualny_strzal] = symbol
 
@@ -719,29 +773,33 @@ elif st.session_state.tryb_pracy == "OS_STRZELECKA":
             st.session_state.aktualny_zawodnik_idx = 0
             st.session_state.aktualny_strzal += 1
 
-    if st.session_state.aktualny_strzal >= st.session_state.limit_rzutkow:
-        st.success("🔥 Zmiana zakończona. Możesz zapisać wyniki do lokalnego Excela.")
+    if st.session_state.aktualny_strzal >= limit:
+        st.success("🔥 Zmiana zakończona.")
 
-        if st.button("💾 ZAPISZ WYNIKI DO LOKALNEGO EXCELA", type="primary", use_container_width=True):
+        # zapisujemy wyniki automatycznie po wejściu w stan zakończenia
+        if "zapisano_zmiane" not in st.session_state:
+            st.session_state.zapisano_zmiane = ""
+
+        if st.session_state.zapisano_zmiane != st.session_state.nazwa_zmiany:
             try:
-                df_aktualny = wczytaj_excel_lokalny()
-                df_po_zapisie = zapisz_wyniki_zmiany_do_df(df_aktualny)
-                zapisz_excel_lokalny(df_po_zapisie)
-
-                st.success("Wyniki zapisane. Arkusze rankingowe zostały przebudowane.")
-
-                st.session_state.wybrani_zawodnicy = []
-                st.session_state.macierz_wynikow = {}
-                st.session_state.tryb_pracy = "MENU_START"
-                st.rerun()
+                zapisz_wyniki_zmiany(path)
+                st.session_state.zapisano_zmiane = st.session_state.nazwa_zmiany
+                st.success("Wyniki automatycznie zapisane do aktywnego pliku Excel. Rankingi przebudowane.")
             except Exception as e:
-                st.error(f"Nie udało się zapisać wyników: {e}")
+                st.error(f"Nie udało się automatycznie zapisać wyników: {e}")
 
-        if LOCAL_EXCEL_PATH.exists():
+        c1, c2 = st.columns(2)
+
+        with c1:
+            if st.button("✅ Nowa zmiana", type="primary", use_container_width=True):
+                zakoncz_i_wroc_do_menu()
+                st.rerun()
+
+        with c2:
             st.download_button(
-                "⬇️ Pobierz Excel z wynikami",
-                data=excel_do_pobrania(),
-                file_name="lista_trap_wyniki.xlsx",
+                "⬇️ Pobierz aktywny Excel",
+                data=path.read_bytes(),
+                file_name=path.name,
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
             )
@@ -756,25 +814,24 @@ elif st.session_state.tryb_pracy == "OS_STRZELECKA":
     <b>Stanowisko {st.session_state.aktualny_zawodnik_idx + 1}</b>:
     {aktualny["id_unikalne"]}
     &nbsp; | &nbsp;
-    <b>Strzał {st.session_state.aktualny_strzal + 1}</b>
-    z {st.session_state.limit_rzutkow}
+    <b>Strzał {st.session_state.aktualny_strzal + 1}</b> z {limit}
 </div>
 """,
             unsafe_allow_html=True,
         )
 
-        col_b1, col_b2, col_b3 = st.columns(3)
+        b1, b2, b3 = st.columns(3)
 
-        with col_b1:
+        with b1:
             st.button(
                 "🔵 Trafiony 1 ( / )",
-                use_container_width=True,
                 type="primary",
+                use_container_width=True,
                 on_click=rejestruj,
                 args=("/",),
             )
 
-        with col_b2:
+        with b2:
             st.button(
                 "🟢 Trafiony 2 ( X )",
                 use_container_width=True,
@@ -782,7 +839,7 @@ elif st.session_state.tryb_pracy == "OS_STRZELECKA":
                 args=("X",),
             )
 
-        with col_b3:
+        with b3:
             st.button(
                 "🔴 Pudło ( O )",
                 use_container_width=True,
@@ -792,27 +849,29 @@ elif st.session_state.tryb_pracy == "OS_STRZELECKA":
 
     st.markdown("---")
 
-    col_nav1, col_nav2 = st.columns([1, 1])
+    cnav1, cnav2 = st.columns(2)
 
-    with col_nav1:
-        if st.button("⬅️ Anuluj i wróć do menu"):
-            st.session_state.tryb_pracy = "MENU_START"
-            st.session_state.wybrani_zawodnicy = []
-            st.session_state.macierz_wynikow = {}
+    with cnav1:
+        if st.button("⬅️ Anuluj zmianę i wróć do menu"):
+            zakoncz_i_wroc_do_menu()
             st.rerun()
 
-    with col_nav2:
-        if st.session_state.aktualny_strzal > 0 or st.session_state.aktualny_zawodnik_idx > 0:
-            if st.button("↩️ Cofnij ostatni wpis"):
+    with cnav2:
+        if st.button("↩️ Cofnij ostatni wpis"):
+            if st.session_state.aktualny_strzal == 0 and st.session_state.aktualny_zawodnik_idx == 0:
+                st.warning("Nie ma czego cofnąć.")
+            else:
                 if st.session_state.aktualny_zawodnik_idx == 0:
                     st.session_state.aktualny_strzal -= 1
                     st.session_state.aktualny_zawodnik_idx = len(st.session_state.wybrani_zawodnicy) - 1
                 else:
                     st.session_state.aktualny_zawodnik_idx -= 1
 
-                id_u = st.session_state.wybrani_zawodnicy[
-                    st.session_state.aktualny_zawodnik_idx
-                ]["id_unikalne"]
+                zawodnik = st.session_state.wybrani_zawodnicy[st.session_state.aktualny_zawodnik_idx]
+                id_u = zawodnik["id_unikalne"]
 
-                st.session_state.macierz_wynikow[id_u][st.session_state.aktualny_strzal] = "-"
+                if id_u in st.session_state.macierz_wynikow:
+                    if 0 <= st.session_state.aktualny_strzal < len(st.session_state.macierz_wynikow[id_u]):
+                        st.session_state.macierz_wynikow[id_u][st.session_state.aktualny_strzal] = "-"
+
                 st.rerun()
