@@ -488,7 +488,7 @@ KODY_LIST = {
 }
 
 kod_listy = st.sidebar.text_input(
-    "Kod listy klubowej:",
+    "Kod listy klubowej lub link do pliku:",
     placeholder="np. snajper",
 ).strip().lower()
 
