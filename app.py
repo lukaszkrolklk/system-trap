@@ -43,51 +43,232 @@ ARKUSZ_REZULTATY_PK = "Rezultaty PK"
 st.markdown(
     """
 <style>
+    /* ============================================================
+       TRAP20 — styl responsywny pod telefon / tablet
+       ============================================================ */
+
     .main-title {
-        font-size: 34px;
+        font-size: 30px;
         font-weight: 900;
         margin-bottom: 2px;
+        line-height: 1.12;
     }
+
     .subtitle {
         color: #64748b;
-        margin-bottom: 18px;
+        margin-bottom: 12px;
+        font-size: 14px;
     }
+
+    .block-container {
+        padding-top: 1.0rem;
+        padding-bottom: 0.8rem;
+    }
+
     .shot-box {
         display: inline-block;
-        width: 34px;
-        height: 34px;
-        line-height: 34px;
+        width: 30px;
+        height: 30px;
+        line-height: 28px;
         text-align: center;
-        margin: 2px;
+        margin: 1px;
         border-radius: 7px;
         font-weight: 900;
         color: white;
         border: 1px solid #cbd5e1;
-        font-size: 16px;
+        font-size: 14px;
+        box-sizing: border-box;
     }
+
     .shot-blank {
         background-color: #e5e7eb;
         color: #64748b;
     }
+
     .shot-t1 {
         background-color: #1e40af;
     }
+
     .shot-t2 {
         background-color: #15803d;
     }
+
     .shot-miss {
         background-color: #b91c1c;
     }
+
     .current-target {
-        outline: 4px solid #facc15;
+        outline: 3px solid #facc15;
         outline-offset: 1px;
     }
+
+    /* Kompaktowy wiersz zawodnika */
+    .player-row {
+        display: grid;
+        grid-template-columns: 76px 160px minmax(300px, 1fr) 84px;
+        align-items: center;
+        column-gap: 8px;
+        padding: 4px 0;
+        border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+    }
+
+    .player-stand {
+        font-weight: 900;
+        font-size: 14px;
+        white-space: nowrap;
+    }
+
+    .player-name {
+        font-weight: 900;
+        font-size: 14px;
+        line-height: 1.15;
+    }
+
+    .player-type {
+        color: #94a3b8;
+        font-size: 12px;
+        margin-top: 3px;
+    }
+
+    .player-shots {
+        line-height: 32px;
+    }
+
+    .player-sum {
+        font-weight: 900;
+        font-size: 15px;
+        white-space: nowrap;
+        text-align: right;
+    }
+
     .current-player {
-        background: #fef9c3;
-        border: 2px solid #eab308;
-        padding: 18px;
+        background: #1e293b;
+        border: 2px solid #38bdf8;
+        color: white;
+        padding: 10px 14px;
         border-radius: 12px;
-        margin: 12px 0 16px 0;
+        margin: 10px 0 10px 0;
+    }
+
+    .current-player h3 {
+        margin: 0 0 4px 0;
+        font-size: 20px;
+        color: white;
+    }
+
+    .current-player .current-line {
+        font-size: 15px;
+        font-weight: 800;
+        color: white;
+    }
+
+    /* Telefon poziomo / mały tablet */
+    @media (max-width: 950px) {
+        .main-title {
+            font-size: 22px;
+        }
+
+        .subtitle {
+            display: none;
+        }
+
+        .block-container {
+            padding-left: 0.65rem;
+            padding-right: 0.65rem;
+            padding-top: 0.55rem;
+        }
+
+        h2, h3 {
+            margin-top: 0.4rem !important;
+            margin-bottom: 0.35rem !important;
+        }
+
+        .shot-box {
+            width: 25px;
+            height: 25px;
+            line-height: 23px;
+            margin: 1px;
+            border-radius: 6px;
+            font-size: 12px;
+        }
+
+        .player-row {
+            grid-template-columns: 56px 124px minmax(235px, 1fr) 62px;
+            column-gap: 5px;
+            padding: 3px 0;
+        }
+
+        .player-stand {
+            font-size: 12px;
+        }
+
+        .player-name {
+            font-size: 12px;
+        }
+
+        .player-type {
+            font-size: 10px;
+        }
+
+        .player-shots {
+            line-height: 27px;
+        }
+
+        .player-sum {
+            font-size: 12px;
+        }
+
+        .current-player {
+            padding: 7px 10px;
+            margin: 7px 0 7px 0;
+        }
+
+        .current-player h3 {
+            font-size: 15px;
+        }
+
+        .current-player .current-line {
+            font-size: 12px;
+        }
+
+        div[data-testid="stHorizontalBlock"] {
+            gap: 0.4rem;
+        }
+
+        .stButton > button {
+            min-height: 2.25rem;
+            padding-top: 0.22rem;
+            padding-bottom: 0.22rem;
+            font-size: 13px;
+        }
+    }
+
+    /* Telefon pionowo */
+    @media (max-width: 620px) {
+        .player-row {
+            grid-template-columns: 50px 1fr 58px;
+            row-gap: 2px;
+        }
+
+        .player-shots {
+            grid-column: 1 / 4;
+            line-height: 26px;
+        }
+
+        .shot-box {
+            width: 23px;
+            height: 23px;
+            line-height: 21px;
+            font-size: 11px;
+        }
+
+        .player-name {
+            font-size: 12px;
+        }
+
+        .player-sum {
+            font-size: 12px;
+        }
     }
 </style>
 """,
@@ -499,8 +680,9 @@ wlasny_link = ""
 if uzyj_wlasnego_linku:
     wlasny_link = st.sidebar.text_input(
         "Publiczny link Google Sheets do odczytu:",
-        value=st.session_state.google_link,
+        value="",
         placeholder="https://docs.google.com/spreadsheets/d/...",
+        key="custom_google_link",
     ).strip()
 
 if st.sidebar.button("📥 Utwórz NOWY plik zawodów", use_container_width=True):
@@ -520,7 +702,6 @@ if st.sidebar.button("📥 Utwórz NOWY plik zawodów", use_container_width=True
                 st.stop()
 
             link_do_pobrania = wlasny_link
-            st.session_state.google_link = wlasny_link
 
         else:
             st.sidebar.error("Wpisz kod listy klubowej albo zaznacz własny link.")
@@ -531,6 +712,8 @@ if st.sidebar.button("📥 Utwórz NOWY plik zawodów", use_container_width=True
         zapisz_excel(df_google, nowy_plik)
 
         st.session_state.aktywny_plik = str(nowy_plik)
+        if "custom_google_link" in st.session_state:
+            st.session_state.custom_google_link = ""
         zakoncz_i_wroc_do_menu()
 
         st.sidebar.success(f"Utworzono plik: {nowy_plik.name}")
@@ -768,20 +951,20 @@ elif st.session_state.tryb_pracy == "STRZELANIE":
             if (s_idx + 1) % 5 == 0:
                 html += "&nbsp;&nbsp;"
 
-        c1, c2, c3 = st.columns([1, 3, 6])
-
-        with c1:
-            st.write(f"**Stan. {i + 1}**")
-
-        with c2:
-            st.write(f"**{id_u}**")
-            st.caption(z["typ"])
-
-        with c3:
-            st.markdown(
-                f"{html} &nbsp;&nbsp;&nbsp; **Suma: {suma} / {pierwszy}**",
-                unsafe_allow_html=True,
-            )
+        st.markdown(
+            f"""
+<div class="player-row">
+    <div class="player-stand">Stan. {i + 1}</div>
+    <div>
+        <div class="player-name">{id_u}</div>
+        <div class="player-type">{z["typ"]}</div>
+    </div>
+    <div class="player-shots">{html}</div>
+    <div class="player-sum">{suma} / {pierwszy}</div>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
 
     st.markdown("---")
 
@@ -848,10 +1031,11 @@ elif st.session_state.tryb_pracy == "STRZELANIE":
             f"""
 <div class="current-player">
     <h3>📣 Bieżący strzał</h3>
-    <b>Stanowisko {st.session_state.aktualny_zawodnik_idx + 1}</b>:
-    {aktualny["id_unikalne"]}
-    &nbsp; | &nbsp;
-    <b>Strzał {st.session_state.aktualny_strzal + 1}</b> z {limit}
+    <div class="current-line">
+        Stanowisko {st.session_state.aktualny_zawodnik_idx + 1}: {aktualny["id_unikalne"]}
+        &nbsp; | &nbsp;
+        Strzał {st.session_state.aktualny_strzal + 1} z {limit}
+    </div>
 </div>
 """,
             unsafe_allow_html=True,
