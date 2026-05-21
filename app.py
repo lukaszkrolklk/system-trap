@@ -489,7 +489,7 @@ KODY_LIST = {
 
 kod_listy = st.sidebar.text_input(
     "Kod listy klubowej lub link do pliku:",
-    placeholder="np. snajper",
+    placeholder="np. Ala ma kota ;)",
 ).strip().lower()
 
 uzyj_wlasnego_linku = st.sidebar.checkbox("Użyj własnego linku Google Sheets")
