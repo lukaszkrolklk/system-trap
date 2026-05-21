@@ -83,8 +83,9 @@ st.markdown(
         outline-offset: 1px;
     }
     .current-player {
-        background: #fef9c3;
-        border: 2px solid #eab308;
+        background: #1e293b;
+        border: 2px solid #38bdf8;
+        color: white;
         padding: 18px;
         border-radius: 12px;
         margin: 12px 0 16px 0;
