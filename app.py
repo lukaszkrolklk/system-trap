@@ -1,3 +1,4 @@
+
 import re
 from datetime import datetime
 from pathlib import Path
@@ -43,52 +44,232 @@ ARKUSZ_REZULTATY_PK = "Rezultaty PK"
 st.markdown(
     """
 <style>
+    /* ======================================================
+       TRAP20 — układ mobilny / tabletowy
+       ====================================================== */
+
     .main-title {
-        font-size: 34px;
+        font-size: 28px;
         font-weight: 900;
-        margin-bottom: 2px;
+        margin-bottom: 0;
+        line-height: 1.15;
     }
+
     .subtitle {
-        color: #64748b;
-        margin-bottom: 18px;
+        color: #94a3b8;
+        margin-bottom: 10px;
+        font-size: 14px;
     }
+
+    /* Ograniczamy puste przestrzenie Streamlit */
+    .block-container {
+        padding-top: 1.2rem;
+        padding-bottom: 0.8rem;
+    }
+
+    header[data-testid="stHeader"] {
+        height: 0;
+    }
+
+    section[data-testid="stSidebar"] {
+        min-width: 280px !important;
+    }
+
+    /* Kafle strzałów */
     .shot-box {
         display: inline-block;
-        width: 34px;
-        height: 34px;
-        line-height: 34px;
+        width: 30px;
+        height: 30px;
+        line-height: 28px;
         text-align: center;
-        margin: 2px;
+        margin: 1px;
         border-radius: 7px;
         font-weight: 900;
         color: white;
         border: 1px solid #cbd5e1;
-        font-size: 16px;
+        font-size: 14px;
+        box-sizing: border-box;
     }
+
     .shot-blank {
         background-color: #e5e7eb;
         color: #64748b;
     }
+
     .shot-t1 {
         background-color: #1e40af;
     }
+
     .shot-t2 {
         background-color: #15803d;
     }
+
     .shot-miss {
         background-color: #b91c1c;
     }
+
     .current-target {
-        outline: 4px solid #facc15;
+        outline: 3px solid #facc15;
         outline-offset: 1px;
     }
+
+    /* Wiersz zawodnika */
+    .player-row {
+        display: grid;
+        grid-template-columns: 96px 170px minmax(300px, 1fr) 92px;
+        align-items: center;
+        column-gap: 10px;
+        padding: 5px 0;
+        border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+    }
+
+    .player-stand {
+        font-weight: 900;
+        font-size: 15px;
+        white-space: nowrap;
+    }
+
+    .player-name {
+        font-weight: 900;
+        font-size: 15px;
+        line-height: 1.15;
+    }
+
+    .player-type {
+        color: #94a3b8;
+        font-size: 12px;
+        margin-top: 3px;
+    }
+
+    .player-shots {
+        line-height: 34px;
+    }
+
+    .player-sum {
+        font-weight: 900;
+        font-size: 16px;
+        white-space: nowrap;
+        text-align: right;
+    }
+
+    /* Panel bieżącego strzału */
     .current-player {
         background: #1e293b;
         border: 2px solid #38bdf8;
         color: white;
-        padding: 18px;
+        padding: 10px 14px;
         border-radius: 12px;
-        margin: 12px 0 16px 0;
+        margin: 10px 0 10px 0;
+    }
+
+    .current-player h3 {
+        margin: 0 0 4px 0;
+        font-size: 20px;
+    }
+
+    .current-player .current-line {
+        font-size: 15px;
+        font-weight: 800;
+    }
+
+    /* Na telefonie poziomo / wąsko */
+    @media (max-width: 900px) {
+        .main-title {
+            font-size: 22px;
+        }
+
+        .subtitle {
+            display: none;
+        }
+
+        .block-container {
+            padding-left: 0.7rem;
+            padding-right: 0.7rem;
+            padding-top: 0.6rem;
+        }
+
+        .shot-box {
+            width: 25px;
+            height: 25px;
+            line-height: 23px;
+            margin: 1px;
+            border-radius: 6px;
+            font-size: 12px;
+        }
+
+        .player-row {
+            grid-template-columns: 58px 128px minmax(240px, 1fr) 72px;
+            column-gap: 6px;
+            padding: 3px 0;
+        }
+
+        .player-stand {
+            font-size: 13px;
+        }
+
+        .player-name {
+            font-size: 13px;
+        }
+
+        .player-type {
+            font-size: 11px;
+        }
+
+        .player-shots {
+            line-height: 28px;
+        }
+
+        .player-sum {
+            font-size: 13px;
+        }
+
+        .current-player {
+            padding: 8px 10px;
+            margin: 8px 0 8px 0;
+        }
+
+        .current-player h3 {
+            font-size: 16px;
+        }
+
+        .current-player .current-line {
+            font-size: 13px;
+        }
+
+        div[data-testid="stHorizontalBlock"] {
+            gap: 0.45rem;
+        }
+
+        .stButton > button {
+            min-height: 2.35rem;
+            padding-top: 0.25rem;
+            padding-bottom: 0.25rem;
+            font-size: 14px;
+        }
+    }
+
+    /* Na telefonie pionowo */
+    @media (max-width: 620px) {
+        .player-row {
+            grid-template-columns: 54px 1fr 62px;
+            row-gap: 3px;
+        }
+
+        .player-shots {
+            grid-column: 1 / 4;
+            line-height: 27px;
+        }
+
+        .shot-box {
+            width: 24px;
+            height: 24px;
+            line-height: 22px;
+            font-size: 12px;
+        }
+
+        .player-name {
+            font-size: 13px;
+        }
     }
 </style>
 """,
@@ -479,67 +660,28 @@ for k, v in defaults.items():
 
 st.sidebar.header("📁 Plik zawodów")
 
-# ------------------------------------------------------------
-# KODY LIST KLUBOWYCH
-# ------------------------------------------------------------
-# To są wygodne skróty dla sędziów.
-# Nie jest to zabezpieczenie, tylko prosty sposób, żeby nie wpisywać długiego linku.
-KODY_LIST = {
-    "snajper": "https://docs.google.com/spreadsheets/d/1I8OGAXZEDWY3wgP_hKaepQF390BCUwxMBOrcPDJmlhA/edit?gid=0#gid=0",
-}
+st.session_state.google_link = st.sidebar.text_input(
+    "Publiczny link Google Sheets do odczytu:",
+    value=st.session_state.google_link,
+    placeholder="https://docs.google.com/spreadsheets/d/...",
+)
 
-kod_listy = st.sidebar.text_input(
-    "Kod listy klubowej lub link do pliku:",
-    placeholder="np. Ala ma kota a kot ma strzelbę ;)",
-).strip().lower()
+if st.sidebar.button("📥 Pobierz listę z Google i utwórz NOWY plik zawodów", use_container_width=True):
+    if not st.session_state.google_link.strip():
+        st.sidebar.error("Wklej link do arkusza Google.")
+    else:
+        try:
+            df_google = pobierz_liste_z_google(st.session_state.google_link)
+            nowy_plik = nazwa_nowego_pliku()
+            zapisz_excel(df_google, nowy_plik)
 
-uzyj_wlasnego_linku = st.sidebar.checkbox("Użyj własnego linku Google Sheets")
+            st.session_state.aktywny_plik = str(nowy_plik)
+            zakoncz_i_wroc_do_menu()
 
-wlasny_link = ""
-
-if uzyj_wlasnego_linku:
-    wlasny_link = st.sidebar.text_input(
-        "Publiczny link Google Sheets:",
-        value="",
-        placeholder="https://docs.google.com/...",
-        key="custom_google_link"
-    ).strip()
-
-if st.sidebar.button("📥 Utwórz NOWY plik zawodów", use_container_width=True):
-    try:
-        link_do_pobrania = ""
-
-        if kod_listy:
-            if kod_listy not in KODY_LIST:
-                st.sidebar.error("Nieznany kod listy klubowej.")
-                st.stop()
-
-            link_do_pobrania = KODY_LIST[kod_listy]
-
-        elif uzyj_wlasnego_linku:
-            if not wlasny_link:
-                st.sidebar.error("Wklej własny link Google Sheets.")
-                st.stop()
-
-            link_do_pobrania = wlasny_link
-            st.session_state.google_link = wlasny_link
-
-        else:
-            st.sidebar.error("Wpisz kod listy klubowej albo zaznacz własny link.")
-            st.stop()
-
-        df_google = pobierz_liste_z_google(link_do_pobrania)
-        nowy_plik = nazwa_nowego_pliku()
-        zapisz_excel(df_google, nowy_plik)
-
-        st.session_state.aktywny_plik = str(nowy_plik)
-        zakoncz_i_wroc_do_menu()
-
-        st.sidebar.success(f"Utworzono plik: {nowy_plik.name}")
-        st.rerun()
-
-    except Exception as e:
-        st.sidebar.error(f"Nie udało się utworzyć pliku zawodów: {e}")
+            st.sidebar.success(f"Utworzono plik: {nowy_plik.name}")
+            st.rerun()
+        except Exception as e:
+            st.sidebar.error(f"Nie udało się pobrać danych z Google: {e}")
 
 pliki = lista_plikow_zawodow()
 
@@ -556,29 +698,6 @@ if pliki:
         index=index,
     )
 
-if st.sidebar.button("🗑 Usuń wybrany plik", use_container_width=True):
-
-    try:
-        plik_do_usuniecia = DATA_DIR / wybor_pliku
-
-        if plik_do_usuniecia.exists():
-            plik_do_usuniecia.unlink()
-
-        st.sidebar.success("Plik został usunięty.")
-
-        # reset aktywnego pliku
-        st.session_state.aktywny_plik = ""
-
-        zakoncz_i_wroc_do_menu()
-
-        st.rerun()
-
-    except Exception as e:
-        st.sidebar.error(f"Nie udało się usunąć pliku: {e}")
-
-    except Exception as e:
-        st.sidebar.error(f"Nie udało się usunąć pliku: {e}")
-    
     wybrany_path = DATA_DIR / wybor_pliku
 
     if str(wybrany_path) != st.session_state.aktywny_plik:
@@ -793,20 +912,20 @@ elif st.session_state.tryb_pracy == "STRZELANIE":
             if (s_idx + 1) % 5 == 0:
                 html += "&nbsp;&nbsp;"
 
-        c1, c2, c3 = st.columns([1, 3, 6])
-
-        with c1:
-            st.write(f"**Stan. {i + 1}**")
-
-        with c2:
-            st.write(f"**{id_u}**")
-            st.caption(z["typ"])
-
-        with c3:
-            st.markdown(
-                f"{html} &nbsp;&nbsp;&nbsp; **Suma: {suma} / {pierwszy}**",
-                unsafe_allow_html=True,
-            )
+        st.markdown(
+            f"""
+<div class="player-row">
+    <div class="player-stand">Stan. {i + 1}</div>
+    <div>
+        <div class="player-name">{id_u}</div>
+        <div class="player-type">{z["typ"]}</div>
+    </div>
+    <div class="player-shots">{html}</div>
+    <div class="player-sum">{suma} / {pierwszy}</div>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
 
     st.markdown("---")
 
@@ -873,10 +992,11 @@ elif st.session_state.tryb_pracy == "STRZELANIE":
             f"""
 <div class="current-player">
     <h3>📣 Bieżący strzał</h3>
-    <b>Stanowisko {st.session_state.aktualny_zawodnik_idx + 1}</b>:
-    {aktualny["id_unikalne"]}
-    &nbsp; | &nbsp;
-    <b>Strzał {st.session_state.aktualny_strzal + 1}</b> z {limit}
+    <div class="current-line">
+        Stanowisko {st.session_state.aktualny_zawodnik_idx + 1}: {aktualny["id_unikalne"]}
+        &nbsp; | &nbsp;
+        Strzał {st.session_state.aktualny_strzal + 1} z {limit}
+    </div>
 </div>
 """,
             unsafe_allow_html=True,
