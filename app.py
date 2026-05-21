@@ -838,27 +838,57 @@ if st.session_state.tryb_pracy == "MENU":
     st.subheader("📋 Skład zmiany")
 
     dostepni = zbuduj_liste_dostepnych(df_baza)
-    juz_dodani = [z["id_unikalne"] for z in st.session_state.wybrani_zawodnicy]
-    
-    # Dodajemy pusty ciąg na początku listy - to trik, który aktywuje lupę/wyszukiwanie na telefonach
-    opcje = [""] + [z["wyswietl"] for z in dostepni if z["wyswietl"] not in juz_dodani]
+
+    juz_dodani = {
+        z["id_unikalne"]
+        for z in st.session_state.wybrani_zawodnicy
+    }
+
+    filtr = st.text_input(
+        "Szukaj zawodnika:",
+        placeholder="Wpisz kilka liter nazwiska...",
+        key="filtr_zawodnika",
+    ).strip().upper()
+
+    dostepni_po_filtrze = []
+
+    for z in dostepni:
+        if z["wyswietl"] in juz_dodani:
+            continue
+
+        if filtr and filtr not in z["wyswietl"].upper():
+            continue
+
+        dostepni_po_filtrze.append(z)
+
+    opcje = [""] + [z["wyswietl"] for z in dostepni_po_filtrze]
 
     col1, col2, col3 = st.columns([4, 3, 2])
 
     with col1:
-        # Czysta, pojedyncza lista wyboru zgodna z najnowszym Streamlit
         wybor = st.selectbox(
-            "Wybierz zawodnika z aktywnego pliku:",
+            "Wybierz zawodnika z listy:",
             options=opcje,
             index=0,
-            key="wyszukiwarka_zawodnikow_selectbox"
+            key="wybor_zawodnika",
         )
 
+        if filtr:
+            st.caption(f"Znaleziono: {len(dostepni_po_filtrze)}")
+
     with col2:
-        reczny = st.text_input("Dopisz ręcznie:", "").strip().upper()
+        reczny = st.text_input(
+            "Dopisz ręcznie:",
+            placeholder="Nazwisko i imię",
+            key="reczny_zawodnik",
+        ).strip().upper()
 
     with col3:
-        typ_reczny = st.selectbox("Typ:", ["Standard", "PK"])
+        typ_reczny = st.selectbox(
+            "Typ:",
+            ["Standard", "PK"],
+            key="typ_reczny",
+        )
 
     if st.button("➕ Dodaj zawodnika", type="primary"):
         if len(st.session_state.wybrani_zawodnicy) >= 6:
@@ -867,12 +897,13 @@ if st.session_state.tryb_pracy == "MENU":
             nazwisko = ""
             typ = ""
 
-            # Sprawdzamy czy sędzia wybrał coś sensownego z listy (pomijamy puste "")
             if wybor and wybor.strip():
                 obj = next((z for z in dostepni if z["wyswietl"] == wybor), None)
+
                 if obj:
                     nazwisko = obj["nazwisko"]
                     typ = obj["typ"]
+
             elif reczny:
                 nazwisko = reczny
                 typ = typ_reczny
@@ -884,10 +915,13 @@ if st.session_state.tryb_pracy == "MENU":
 
                 if typ == "Standard" and standard_zrobiony:
                     st.error(f"{nazwisko} ma już wynik Standard. Może startować tylko jako PK.")
+
                 elif typ == "PK" and not standard_zrobiony:
                     st.error(f"{nazwisko} nie ma jeszcze wyniku Standard. PK jest możliwe dopiero po Standardzie.")
+
                 elif typ == "PK" and pk_zrobiony:
                     st.error(f"{nazwisko} ma już zapisany wynik PK.")
+
                 else:
                     id_unikalne = f"{nazwisko} [PK]" if typ == "PK" else nazwisko
 
@@ -899,9 +933,7 @@ if st.session_state.tryb_pracy == "MENU":
                             "id_unikalne": id_unikalne,
                             "typ": typ,
                         })
-                        
-                        # Resetujemy selectbox do pierwszej, pustej pozycji ""
-                        st.session_state["wyszukiwarka_zawodnikow_selectbox"] = ""
+
                         st.rerun()
 
     if st.session_state.wybrani_zawodnicy:
@@ -932,6 +964,8 @@ if st.session_state.tryb_pracy == "MENU":
             st.session_state.nazwa_zmiany = f"Zmiana {nr_zmiany}"
             st.session_state.aktualny_strzal = 0
             st.session_state.aktualny_zawodnik_idx = 0
+            st.session_state.zapisano_zmiane = ""
+
             st.session_state.macierz_wynikow = {
                 z["id_unikalne"]: ["-"] * int(limit_rzutkow)
                 for z in st.session_state.wybrani_zawodnicy
