@@ -811,6 +811,7 @@ df_baza = wczytaj_excel(path)
 st.caption(f"Aktywny plik: `{path.name}`")
 
 
+
 # ============================================================
 # MENU STARTOWE
 # ============================================================
@@ -841,36 +842,68 @@ if st.session_state.tryb_pracy == "MENU":
 
     col1, col2, col3 = st.columns([4, 3, 2])
 
-    # Inicjalizacja klucza sesji dla wyszukiwarki, aby móc ją czyścić programowo
-    if "wyszukaj_zawodnika_input" not in st.session_state:
-        st.session_state["wyszukaj_zawodnika_input"] = ""
-
     with col1:
-        # Prawdziwe JEDNO okienko wyszukiwania (st.text_input gwarantuje otwarcie klawiatury na telefonie)
-        wybor_raw = st.text_input(
-            "Wyszukaj i wybierz zawodnika z bazy:",
-            key="wyszukaj_zawodnika_input",
-            placeholder="🔍 Wpisz fragment nazwiska...",
-            autocomplete="off"
-        ).strip().upper()
+        # JEDNO OKNO: Prawdziwa lista wyboru, która dzięki 'no_selection_label' wymusza klawiaturę na telefonie
+        wybor = st.selectbox(
+            "Wybierz zawodnika z aktywnego pliku:",
+            options=opcje,
+            placeholder="🔍 Wpisz nazwisko lub rozwiń...",
+            no_selection_label=" ",  # To wymusza tryb wpisywania/szukania na telefonach!
+            index=None,              # Zaczyna jako puste okno
+            key="wyszukiwarka_zawodnikow_selectbox"  # Klucz do automatycznego resetowania pola
+        )
 
-        wybor = ""
-        # Logika dynamicznych podpowiedzi bez tworzenia osobnych pól formularza
-        if wybor_raw:
-            dopasowane = [o for o in opcje if wybor_raw in o.upper()]
-            if len(dopasowane) == 1:
-                # Jeśli pasuje dokładnie jedna osoba (lub sędzia wpisał całość), wybieramy ją
-                wybor = dopasowane[0]
-                st.success(f"🎯 Wybrano: {wybor}")
-            elif len(dopasowane) > 1:
-                # Jeśli pasuje kilka osób, wyświetlamy je jako klikalne przyciski pomocnicze
-                st.caption("👇 Pasujący zawodnicy (kliknij właściwego, aby uzupełnić):")
-                cols_podpowiedzi = st.columns(min(len(dopasowane), 3))
-                for idx, podpowiedz in enumerate(dopasowane[:6]): # Maksymalnie 6 podpowiedzi na raz
-                    with cols_podpowiedzi[idx % min(len(dopasowane), 3)]:
-                        if st.button(podpowiedz, key=f"podp_{idx}", use_container_width=True):
-                            st.session_state["wyszukaj_zawodnika_input"] = podpowiedz
-                            st.rerun()
+    with col2:
+        reczny = st.text_input("Dopisz ręcznie:", "").strip().upper()
+
+    with col3:
+        typ_reczny = st.selectbox("Typ:", ["Standard", "PK"])
+
+    if st.button("➕ Dodaj zawodnika", type="primary"):
+        if len(st.session_state.wybrani_zawodnicy) >= 6:
+            st.error("W jednej zmianie może być maksymalnie 6 zawodników.")
+        else:
+            nazwisko = ""
+            typ = ""
+
+            if wybor:
+                obj = next((z for z in dostepni if z["wyswietl"] == wybor), None)
+                if obj:
+                    nazwisko = obj["nazwisko"]
+                    typ = obj["typ"]
+            elif reczny:
+                nazwisko = reczny
+                typ = typ_reczny
+
+            if not nazwisko:
+                st.error("Wybierz zawodnika albo wpisz nazwisko ręcznie.")
+            else:
+                standard_zrobiony, pk_zrobiony = statusy_zawodnika(df_baza, nazwisko)
+
+                if typ == "Standard" and standard_zrobiony:
+                    st.error(f"{nazwisko} ma już wynik Standard. Może startować tylko jako PK.")
+                elif typ == "PK" and not standard_zrobiony:
+                    st.error(f"{nazwisko} nie ma jeszcze wyniku Standard. PK jest możliwe dopiero po Standardzie.")
+                elif typ == "PK" and pk_zrobiony:
+                    st.error(f"{nazwisko} ma już zapisany wynik PK.")
+                else:
+                    id_unikalne = f"{nazwisko} [PK]" if typ == "PK" else nazwisko
+
+                    if id_unikalne in juz_dodani:
+                        st.error("Ten zawodnik jest już dodany do tej zmiany.")
+                    else:
+                        st.session_state.wybrani_zawodnicy.append({
+                            "nazwisko": nazwisko,
+                            "id_unikalne": id_unikalne,
+                            "typ": typ,
+                        })
+                        
+                        # Czyścimy okienko selectboxa, żeby po dodaniu znowu było puste
+                        st.session_state["wyszukiwarka_zawodnikow_selectbox"] = None
+                        st.rerun()
+
+
+
                 
                 # Sprawdza czy tekst w polu idealnie pokrywa się z którąś z opcji
                 if wybor_raw in [o.upper() for o in opcje]:
