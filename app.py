@@ -555,6 +555,25 @@ if pliki:
         index=index,
     )
 
+    if st.sidebar.button("🗑 Usuń wybrany plik", use_container_width=True):
+    try:
+        plik_do_usuniecia = DATA_DIR / wybor_pliku
+
+        if plik_do_usuniecia.exists():
+            plik_do_usuniecia.unlink()
+
+        st.sidebar.success("Plik został usunięty.")
+
+        # reset aktywnego pliku
+        st.session_state.aktywny_plik = ""
+
+        zakoncz_i_wroc_do_menu()
+
+        st.rerun()
+
+    except Exception as e:
+        st.sidebar.error(f"Nie udało się usunąć pliku: {e}")
+    
     wybrany_path = DATA_DIR / wybor_pliku
 
     if str(wybrany_path) != st.session_state.aktywny_plik:
