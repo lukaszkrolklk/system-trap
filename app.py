@@ -1,4 +1,3 @@
-
 import re
 from datetime import datetime
 from pathlib import Path
@@ -479,28 +478,66 @@ for k, v in defaults.items():
 
 st.sidebar.header("📁 Plik zawodów")
 
-st.session_state.google_link = st.sidebar.text_input(
-    "Publiczny link Google Sheets do odczytu:",
-    value=st.session_state.google_link,
-    placeholder="https://docs.google.com/spreadsheets/d/...",
-)
+# ------------------------------------------------------------
+# KODY LIST KLUBOWYCH
+# ------------------------------------------------------------
+# To są wygodne skróty dla sędziów.
+# Nie jest to zabezpieczenie, tylko prosty sposób, żeby nie wpisywać długiego linku.
+KODY_LIST = {
+    "snajper": "https://docs.google.com/spreadsheets/d/1I8OGAXZEDWY3wgP_hKaepQF390BCUwxMBOrcPDJmlhA/edit?gid=0#gid=0",
+}
 
-if st.sidebar.button("📥 Pobierz listę z Google i utwórz NOWY plik zawodów", use_container_width=True):
-    if not st.session_state.google_link.strip():
-        st.sidebar.error("Wklej link do arkusza Google.")
-    else:
-        try:
-            df_google = pobierz_liste_z_google(st.session_state.google_link)
-            nowy_plik = nazwa_nowego_pliku()
-            zapisz_excel(df_google, nowy_plik)
+kod_listy = st.sidebar.text_input(
+    "Kod listy klubowej:",
+    placeholder="np. snajper",
+).strip().lower()
 
-            st.session_state.aktywny_plik = str(nowy_plik)
-            zakoncz_i_wroc_do_menu()
+uzyj_wlasnego_linku = st.sidebar.checkbox("Użyj własnego linku Google Sheets")
 
-            st.sidebar.success(f"Utworzono plik: {nowy_plik.name}")
-            st.rerun()
-        except Exception as e:
-            st.sidebar.error(f"Nie udało się pobrać danych z Google: {e}")
+wlasny_link = ""
+
+if uzyj_wlasnego_linku:
+    wlasny_link = st.sidebar.text_input(
+        "Publiczny link Google Sheets do odczytu:",
+        value=st.session_state.google_link,
+        placeholder="https://docs.google.com/spreadsheets/d/...",
+    ).strip()
+
+if st.sidebar.button("📥 Utwórz NOWY plik zawodów", use_container_width=True):
+    try:
+        link_do_pobrania = ""
+
+        if kod_listy:
+            if kod_listy not in KODY_LIST:
+                st.sidebar.error("Nieznany kod listy klubowej.")
+                st.stop()
+
+            link_do_pobrania = KODY_LIST[kod_listy]
+
+        elif uzyj_wlasnego_linku:
+            if not wlasny_link:
+                st.sidebar.error("Wklej własny link Google Sheets.")
+                st.stop()
+
+            link_do_pobrania = wlasny_link
+            st.session_state.google_link = wlasny_link
+
+        else:
+            st.sidebar.error("Wpisz kod listy klubowej albo zaznacz własny link.")
+            st.stop()
+
+        df_google = pobierz_liste_z_google(link_do_pobrania)
+        nowy_plik = nazwa_nowego_pliku()
+        zapisz_excel(df_google, nowy_plik)
+
+        st.session_state.aktywny_plik = str(nowy_plik)
+        zakoncz_i_wroc_do_menu()
+
+        st.sidebar.success(f"Utworzono plik: {nowy_plik.name}")
+        st.rerun()
+
+    except Exception as e:
+        st.sidebar.error(f"Nie udało się utworzyć pliku zawodów: {e}")
 
 pliki = lista_plikow_zawodow()
 
