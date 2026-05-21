@@ -810,7 +810,6 @@ df_baza = wczytaj_excel(path)
 
 st.caption(f"Aktywny plik: `{path.name}`")
 
-
 # ============================================================
 # MENU STARTOWE
 # ============================================================
@@ -842,22 +841,27 @@ if st.session_state.tryb_pracy == "MENU":
     col1, col2, col3 = st.columns([4, 3, 2])
 
     with col1:
-        wybor_tekst = st.text_input(
-            "Wybierz zawodnika (wpisz fragment):", 
-            value="",
-            autocomplete="off",
-            help="Zacznij wpisywać nazwisko, system podpowie osoby z bazy."
+        # 1. Najpierw wpisujesz filtr (tutaj telefon na 100% pokaże klawiaturę)
+        szukaj = st.text_input(
+            "Wyszukaj zawodnika z bazy:", 
+            value="", 
+            placeholder="Wpisz np. KOWALSKI",
+            autocomplete="off"
         ).strip().upper()
         
-        if wybor_tekst:
-            dopasowane_opcje = [o for o in opcje if wybor_tekst in o.upper()]
-            if dopasowane_opcje:
-                wybor = st.selectbox("Potwierdź wybór zawodnika:", dopasowane_opcje)
-            else:
-                wybor = ""
-                st.caption("⚠️ Brak pasujących zawodników w bazie.")
+        # 2. Filtrujemy listę opcji na podstawie wpisanego tekstu
+        if szukaj:
+            przefiltrowane_opcje = [o for o in opcje if szukaj in o.upper()]
         else:
-            wybor = ""
+            przefiltrowane_opcje = opcje
+
+        # 3. Wyświetlamy selectbox z przefiltrowaną listą (jest krótka, więc łatwo kliknąć)
+        wybor = st.selectbox(
+            "Wybierz z listy:",
+            [""] + przefiltrowane_opcje,
+            index=0,
+            key="wybor_zawodnika_selectbox"
+        )
 
     with col2:
         reczny = st.text_input("Dopisz ręcznie (spoza bazy):", "").strip().upper()
@@ -872,6 +876,7 @@ if st.session_state.tryb_pracy == "MENU":
             nazwisko = ""
             typ = ""
 
+            # Przypisujemy zawodnika z listy filtrującej
             if wybor:
                 obj = next((z for z in dostepni if z["wyswietl"] == wybor), None)
                 if obj:
@@ -882,7 +887,7 @@ if st.session_state.tryb_pracy == "MENU":
                 typ = typ_reczny
 
             if not nazwisko:
-                st.error("Wybierz zawodnika albo wpisz nazwisko ręcznie.")
+                st.error("Wybierz zawodnika z listy lub wpisz nazwisko ręcznie.")
             else:
                 standard_zrobiony, pk_zrobiony = statusy_zawodnika(df_baza, nazwisko)
 
@@ -904,6 +909,7 @@ if st.session_state.tryb_pracy == "MENU":
                             "typ": typ,
                         })
                         st.rerun()
+
 
     if st.session_state.wybrani_zawodnicy:
         st.markdown("#### Wybrani zawodnicy")
