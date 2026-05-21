@@ -836,24 +836,41 @@ if st.session_state.tryb_pracy == "MENU":
     st.subheader("📋 Skład zmiany")
 
     dostepni = zbuduj_liste_dostepnych(df_baza)
-    juz_dodani = [z["id_unikalne"] for z in st.session_state.wybrani_zawodnicy]
-    opcje = [z["wyswietl"] for z in dostepni if z["wyswietl"] not in juz_dodani]
-
-    col1, col2, col3 = st.columns([4, 3, 2])
-
-    with col1:
-        wybor = st.selectbox("Wybierz zawodnika z aktywnego pliku:", [""] + opcje)
-
-    with col2:
-        reczny = st.text_input("Dopisz ręcznie:", "").strip().upper()
-
-    with col3:
-        typ_reczny = st.selectbox("Typ:", ["Standard", "PK"])
-
-    if st.button("➕ Dodaj zawodnika", type="primary"):
-        if len(st.session_state.wybrani_zawodnicy) >= 6:
-            st.error("W jednej zmianie może być maksymalnie 6 zawodników.")
-        else:
+        juz_dodani = [z["id_unikalne"] for z in st.session_state.wybrani_zawodnicy]
+        opcje = [z["wyswietl"] for z in dostepni if z["wyswietl"] not in juz_dodani]
+    
+        col1, col2, col3 = st.columns([4, 3, 2])
+    
+        with col1:
+            # st.text_input z parametrem autocomplete wymusza pojawienie się klawiatury
+            wybor_tekst = st.text_input(
+                "Wybierz zawodnika (wpisz fragment):", 
+                value="",
+                autocomplete="off", # zapobiega śmieciom z pamięci telefonu
+                help="Zacznij wpisywać nazwisko, system podpowie osoby z bazy."
+            ).strip().upper()
+            
+            # Filtrowanie opcji na żywo na podstawie tego, co sędzia wpisał
+            if wybor_tekst:
+                dopasowane_opcje = [o for o in opcje if wybor_tekst in o.upper()]
+                if dopasowane_opcje:
+                    wybor = st.selectbox("Potwierdź wybór zawodnika:", dopasowane_opcje)
+                else:
+                    wybor = ""
+                    st.caption("⚠️ Brak pasujących zawodników w bazie.")
+            else:
+                wybor = ""
+    
+        with col2:
+            reczny = st.text_input("Dopisz ręcznie (spoza bazy):", "").strip().upper()
+    
+        with col3:
+            typ_reczny = st.selectbox("Typ:", ["Standard", "PK"])
+    
+        if st.button("➕ Dodaj zawodnika", type="primary"):
+            if len(st.session_state.wybrani_zawodnicy) >= 6:
+                st.error("W jednej zmianie może być maksymalnie 6 zawodników.")
+            else:
             nazwisko = ""
             typ = ""
 
