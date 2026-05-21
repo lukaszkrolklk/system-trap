@@ -812,6 +812,7 @@ st.caption(f"Aktywny plik: `{path.name}`")
 
 
 
+
 # ============================================================
 # MENU STARTOWE
 # ============================================================
@@ -843,14 +844,14 @@ if st.session_state.tryb_pracy == "MENU":
     col1, col2, col3 = st.columns([4, 3, 2])
 
     with col1:
-        # JEDNO OKNO: Prawdziwa lista wyboru, która dzięki 'no_selection_label' wymusza klawiaturę na telefonie
+        # JEDNO OKNO: Prawdziwa lista wyboru, która dzięki no_selection_label wymusza klawiaturę na telefonie
         wybor = st.selectbox(
             "Wybierz zawodnika z aktywnego pliku:",
             options=opcje,
             placeholder="🔍 Wpisz nazwisko lub rozwiń...",
-            no_selection_label=" ",  # To wymusza tryb wpisywania/szukania na telefonach!
-            index=None,              # Zaczyna jako puste okno
-            key="wyszukiwarka_zawodnikow_selectbox"  # Klucz do automatycznego resetowania pola
+            no_selection_label=" ",  # Wymusza tryb wpisywania/szukania na telefonach
+            index=None,              # Startuje jako puste pole
+            key="wyszukiwarka_zawodnikow_selectbox"  # Do automatycznego czyszczenia pola w sesji
         )
 
     with col2:
@@ -898,68 +899,8 @@ if st.session_state.tryb_pracy == "MENU":
                             "typ": typ,
                         })
                         
-                        # Czyścimy okienko selectboxa, żeby po dodaniu znowu było puste
+                        # Resetowanie pola wyszukiwarki do stanu początkowego (wyczyszczenie tekstu)
                         st.session_state["wyszukiwarka_zawodnikow_selectbox"] = None
-                        st.rerun()
-
-
-
-                
-                # Sprawdza czy tekst w polu idealnie pokrywa się z którąś z opcji
-                if wybor_raw in [o.upper() for o in opcje]:
-                    wybor = next(o for o in opcje if o.upper() == wybor_raw)
-            else:
-                st.error("❌ Brak wyników w bazie. Użyj okna obok do dopisania ręcznego.")
-        else:
-            st.caption("💡 Zacznij wpisywać, system podpowie osoby z bazy.")
-
-    with col2:
-        reczny = st.text_input("Dopisz ręcznie:", "").strip().upper()
-
-    with col3:
-        typ_reczny = st.selectbox("Typ:", ["Standard", "PK"])
-
-    if st.button("➕ Dodaj zawodnika", type="primary"):
-        if len(st.session_state.wybrani_zawodnicy) >= 6:
-            st.error("W jednej zmianie może być maksymalnie 6 zawodników.")
-        else:
-            nazwisko = ""
-            typ = ""
-
-            if wybor:
-                obj = next((z for z in dostepni if z["wyswietl"] == wybor), None)
-                if obj:
-                    nazwisko = obj["nazwisko"]
-                    typ = obj["typ"]
-            elif reczny:
-                nazwisko = reczny
-                typ = typ_reczny
-
-            if not nazwisko:
-                st.error("Wybierz zawodnika albo wpisz nazwisko ręcznie.")
-            else:
-                standard_zrobiony, pk_zrobiony = statusy_zawodnika(df_baza, nazwisko)
-
-                if typ == "Standard" and standard_zrobiony:
-                    st.error(f"{nazwisko} ma już wynik Standard. Może startować tylko jako PK.")
-                elif typ == "PK" and not standard_zrobiony:
-                    st.error(f"{nazwisko} nie ma jeszcze wyniku Standard. PK jest możliwe dopiero po Standardzie.")
-                elif typ == "PK" and pk_zrobiony:
-                    st.error(f"{nazwisko} ma już zapisany wynik PK.")
-                else:
-                    id_unikalne = f"{nazwisko} [PK]" if typ == "PK" else nazwisko
-
-                    if id_unikalne in juz_dodani:
-                        st.error("Ten zawodnik jest już dodany do tej zmiany.")
-                    else:
-                        st.session_state.wybrani_zawodnicy.append({
-                            "nazwisko": nazwisko,
-                            "id_unikalne": id_unikalne,
-                            "typ": typ,
-                        })
-                        
-                        # KLUCZOWE: Automatyczne czyszczenie wyszukiwarki po poprawnym dodaniu
-                        st.session_state["wyszukaj_zawodnika_input"] = ""
                         st.rerun()
 
     if st.session_state.wybrani_zawodnicy:
@@ -995,7 +936,6 @@ if st.session_state.tryb_pracy == "MENU":
                 for z in st.session_state.wybrani_zawodnicy
             }
 
-            # od razu zapisujemy skład zmiany do aktywnego Excela
             zapisz_pusty_start_zmiany(path)
             st.rerun()
 
@@ -1012,6 +952,8 @@ if st.session_state.tryb_pracy == "MENU":
 
     with tab3:
         st.dataframe(df_baza, use_container_width=True, hide_index=True)
+
+
 
 
 # ============================================================
