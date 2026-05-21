@@ -810,6 +810,7 @@ df_baza = wczytaj_excel(path)
 
 st.caption(f"Aktywny plik: `{path.name}`")
 
+
 # ============================================================
 # MENU STARTOWE
 # ============================================================
@@ -840,41 +841,47 @@ if st.session_state.tryb_pracy == "MENU":
 
     col1, col2, col3 = st.columns([4, 3, 2])
 
-    with col1:
-        # Triki wizualny: Pole tekstowe, które na telefonie od razu udaje wyszukiwarkę wewnątrz selectboxa
-        szukaj = st.text_input(
-            "Wybierz zawodnika z bazy (wpisz fragment):", 
-            value="", 
-            placeholder="🔍 Zacznij wpisywać np. KOWALSKI...",
-            autocomplete="off",
-            key="wyszukiwarka_jedyna"
-        ).strip().upper()
-        
-        if szukaj:
-            przefiltrowane_opcje = [o for o in opcje if szukaj in o.upper()]
-            # Informacja dla sędziego, ile osób pasuje
-            if not przefiltrowane_opcje:
-                st.caption("❌ Brak wyników dla tej frazy.")
-        else:
-            przefiltrowane_opcje = opcje
+    # Inicjalizacja klucza sesji dla wyszukiwarki, aby móc ją czyścić programowo
+    if "wyszukaj_zawodnika_input" not in st.session_state:
+        st.session_state["wyszukaj_zawodnika_input"] = ""
 
-        # Zamiast pustego "" na początku, podstawiamy pierwszą pasującą osobę lub komunikat
-        lista_do_wyboru = przefiltrowane_opcje if przefiltrowane_opcje else ["Brak dopasowań"]
-        
-        wybor = st.selectbox(
-            "👇 Kliknij i potwierdź wybór:",
-            lista_do_wyboru,
-            index=0,
-            key="wybor_zawodnika_selectbox",
-            label_visibility="collapsed" # Ukrywamy drugi napis, żeby pola wyglądały jak jedno!
-        )
-        
-        # Jeśli lista jest pusta lub sędzia nic nie wpisał, a lista ma "Brak dopasowań", czyścimy wybór
-        if wybor == "Brak dopasowań":
-            wybor = ""
+    with col1:
+        # Prawdziwe JEDNO okienko wyszukiwania (st.text_input gwarantuje otwarcie klawiatury na telefonie)
+        wybor_raw = st.text_input(
+            "Wyszukaj i wybierz zawodnika z bazy:",
+            key="wyszukaj_zawodnika_input",
+            placeholder="🔍 Wpisz fragment nazwiska...",
+            autocomplete="off"
+        ).strip().upper()
+
+        wybor = ""
+        # Logika dynamicznych podpowiedzi bez tworzenia osobnych pól formularza
+        if wybor_raw:
+            dopasowane = [o for o in opcje if wybor_raw in o.upper()]
+            if len(dopasowane) == 1:
+                # Jeśli pasuje dokładnie jedna osoba (lub sędzia wpisał całość), wybieramy ją
+                wybor = dopasowane[0]
+                st.success(f"🎯 Wybrano: {wybor}")
+            elif len(dopasowane) > 1:
+                # Jeśli pasuje kilka osób, wyświetlamy je jako klikalne przyciski pomocnicze
+                st.caption("👇 Pasujący zawodnicy (kliknij właściwego, aby uzupełnić):")
+                cols_podpowiedzi = st.columns(min(len(dopasowane), 3))
+                for idx, podpowiedz in enumerate(dopasowane[:6]): # Maksymalnie 6 podpowiedzi na raz
+                    with cols_podpowiedzi[idx % min(len(dopasowane), 3)]:
+                        if st.button(podpowiedz, key=f"podp_{idx}", use_container_width=True):
+                            st.session_state["wyszukaj_zawodnika_input"] = podpowiedz
+                            st.rerun()
+                
+                # Sprawdza czy tekst w polu idealnie pokrywa się z którąś z opcji
+                if wybor_raw in [o.upper() for o in opcje]:
+                    wybor = next(o for o in opcje if o.upper() == wybor_raw)
+            else:
+                st.error("❌ Brak wyników w bazie. Użyj okna obok do dopisania ręcznego.")
+        else:
+            st.caption("💡 Zacznij wpisywać, system podpowie osoby z bazy.")
 
     with col2:
-        reczny = st.text_input("Dopisz ręcznie (spoza bazy):", "").strip().upper()
+        reczny = st.text_input("Dopisz ręcznie:", "").strip().upper()
 
     with col3:
         typ_reczny = st.selectbox("Typ:", ["Standard", "PK"])
@@ -886,7 +893,6 @@ if st.session_state.tryb_pracy == "MENU":
             nazwisko = ""
             typ = ""
 
-            # Przypisujemy zawodnika z listy filtrującej
             if wybor:
                 obj = next((z for z in dostepni if z["wyswietl"] == wybor), None)
                 if obj:
@@ -897,7 +903,7 @@ if st.session_state.tryb_pracy == "MENU":
                 typ = typ_reczny
 
             if not nazwisko:
-                st.error("Wpisz fragment nazwiska i zatwierdź na liście poniżej.")
+                st.error("Wybierz zawodnika albo wpisz nazwisko ręcznie.")
             else:
                 standard_zrobiony, pk_zrobiony = statusy_zawodnika(df_baza, nazwisko)
 
@@ -918,11 +924,10 @@ if st.session_state.tryb_pracy == "MENU":
                             "id_unikalne": id_unikalne,
                             "typ": typ,
                         })
-                        # Czyszczenie wyszukiwarki po udanym dodaniu zawodnika
-                        if "wyszukiwarka_jedyna" in st.session_state:
-                            st.session_state.wyszukiwarka_jedyna = ""
+                        
+                        # KLUCZOWE: Automatyczne czyszczenie wyszukiwarki po poprawnym dodaniu
+                        st.session_state["wyszukaj_zawodnika_input"] = ""
                         st.rerun()
-
 
     if st.session_state.wybrani_zawodnicy:
         st.markdown("#### Wybrani zawodnicy")
