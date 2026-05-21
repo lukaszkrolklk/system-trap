@@ -839,19 +839,19 @@ if st.session_state.tryb_pracy == "MENU":
 
     dostepni = zbuduj_liste_dostepnych(df_baza)
     juz_dodani = [z["id_unikalne"] for z in st.session_state.wybrani_zawodnicy]
-    opcje = [z["wyswietl"] for z in dostepni if z["wyswietl"] not in juz_dodani]
+    
+    # Dodajemy pusty ciąg na początku listy - to trik, który aktywuje lupę/wyszukiwanie na telefonach
+    opcje = [""] + [z["wyswietl"] for z in dostepni if z["wyswietl"] not in juz_dodani]
 
     col1, col2, col3 = st.columns([4, 3, 2])
 
     with col1:
-        # JEDNO OKNO: Prawdziwa lista wyboru, która dzięki no_selection_label wymusza klawiaturę na telefonie
+        # Czysta, pojedyncza lista wyboru zgodna z najnowszym Streamlit
         wybor = st.selectbox(
             "Wybierz zawodnika z aktywnego pliku:",
             options=opcje,
-            placeholder="🔍 Wpisz nazwisko lub rozwiń...",
-            no_selection_label=" ",  # Wymusza tryb wpisywania/szukania na telefonach
-            index=None,              # Startuje jako puste pole
-            key="wyszukiwarka_zawodnikow_selectbox"  # Do automatycznego czyszczenia pola w sesji
+            index=0,
+            key="wyszukiwarka_zawodnikow_selectbox"
         )
 
     with col2:
@@ -867,7 +867,8 @@ if st.session_state.tryb_pracy == "MENU":
             nazwisko = ""
             typ = ""
 
-            if wybor:
+            # Sprawdzamy czy sędzia wybrał coś sensownego z listy (pomijamy puste "")
+            if wybor and wybor.strip():
                 obj = next((z for z in dostepni if z["wyswietl"] == wybor), None)
                 if obj:
                     nazwisko = obj["nazwisko"]
@@ -899,8 +900,8 @@ if st.session_state.tryb_pracy == "MENU":
                             "typ": typ,
                         })
                         
-                        # Resetowanie pola wyszukiwarki do stanu początkowego (wyczyszczenie tekstu)
-                        st.session_state["wyszukiwarka_zawodnikow_selectbox"] = None
+                        # Resetujemy selectbox do pierwszej, pustej pozycji ""
+                        st.session_state["wyszukiwarka_zawodnikow_selectbox"] = ""
                         st.rerun()
 
     if st.session_state.wybrani_zawodnicy:
