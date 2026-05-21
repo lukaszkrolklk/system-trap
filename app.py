@@ -841,27 +841,37 @@ if st.session_state.tryb_pracy == "MENU":
     col1, col2, col3 = st.columns([4, 3, 2])
 
     with col1:
-        # 1. Najpierw wpisujesz filtr (tutaj telefon na 100% pokaże klawiaturę)
+        # Triki wizualny: Pole tekstowe, które na telefonie od razu udaje wyszukiwarkę wewnątrz selectboxa
         szukaj = st.text_input(
-            "Wyszukaj zawodnika z bazy:", 
+            "Wybierz zawodnika z bazy (wpisz fragment):", 
             value="", 
-            placeholder="Wpisz np. KOWALSKI",
-            autocomplete="off"
+            placeholder="🔍 Zacznij wpisywać np. KOWALSKI...",
+            autocomplete="off",
+            key="wyszukiwarka_jedyna"
         ).strip().upper()
         
-        # 2. Filtrujemy listę opcji na podstawie wpisanego tekstu
         if szukaj:
             przefiltrowane_opcje = [o for o in opcje if szukaj in o.upper()]
+            # Informacja dla sędziego, ile osób pasuje
+            if not przefiltrowane_opcje:
+                st.caption("❌ Brak wyników dla tej frazy.")
         else:
             przefiltrowane_opcje = opcje
 
-        # 3. Wyświetlamy selectbox z przefiltrowaną listą (jest krótka, więc łatwo kliknąć)
+        # Zamiast pustego "" na początku, podstawiamy pierwszą pasującą osobę lub komunikat
+        lista_do_wyboru = przefiltrowane_opcje if przefiltrowane_opcje else ["Brak dopasowań"]
+        
         wybor = st.selectbox(
-            "Wybierz z listy:",
-            [""] + przefiltrowane_opcje,
+            "👇 Kliknij i potwierdź wybór:",
+            lista_do_wyboru,
             index=0,
-            key="wybor_zawodnika_selectbox"
+            key="wybor_zawodnika_selectbox",
+            label_visibility="collapsed" # Ukrywamy drugi napis, żeby pola wyglądały jak jedno!
         )
+        
+        # Jeśli lista jest pusta lub sędzia nic nie wpisał, a lista ma "Brak dopasowań", czyścimy wybór
+        if wybor == "Brak dopasowań":
+            wybor = ""
 
     with col2:
         reczny = st.text_input("Dopisz ręcznie (spoza bazy):", "").strip().upper()
@@ -887,7 +897,7 @@ if st.session_state.tryb_pracy == "MENU":
                 typ = typ_reczny
 
             if not nazwisko:
-                st.error("Wybierz zawodnika z listy lub wpisz nazwisko ręcznie.")
+                st.error("Wpisz fragment nazwiska i zatwierdź na liście poniżej.")
             else:
                 standard_zrobiony, pk_zrobiony = statusy_zawodnika(df_baza, nazwisko)
 
@@ -908,6 +918,9 @@ if st.session_state.tryb_pracy == "MENU":
                             "id_unikalne": id_unikalne,
                             "typ": typ,
                         })
+                        # Czyszczenie wyszukiwarki po udanym dodaniu zawodnika
+                        if "wyszukiwarka_jedyna" in st.session_state:
+                            st.session_state.wyszukiwarka_jedyna = ""
                         st.rerun()
 
 
