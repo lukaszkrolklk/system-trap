@@ -640,6 +640,50 @@ def zapisz_pusty_start_zmiany(path: Path) -> None:
     zapisz_excel(df, path)
 
 
+def zapisz_robocze_strzaly_zmiany(path: Path) -> None:
+    """
+    Awaryjny zapis po każdym kliknięciu podczas strzelania.
+    Zapisuje aktualnie wpisane strzały do aktywnego Excela jako W TRAKCIE,
+    ale nie wpisuje jeszcze sumy końcowej, żeby niedokończona zmiana nie weszła do rankingu.
+    """
+    if not st.session_state.get("wybrani_zawodnicy"):
+        return
+
+    df = wczytaj_excel(path)
+
+    for zaw in st.session_state.wybrani_zawodnicy:
+        nazwisko = zaw["nazwisko"]
+        typ = zaw["typ"]
+        id_u = zaw["id_unikalne"]
+        strzaly = st.session_state.macierz_wynikow.get(id_u, [])
+
+        maska = (
+            (df["Nazwisko"] == nazwisko)
+            & (df["Typ"] == typ)
+            & (df["Zmiana"] == st.session_state.nazwa_zmiany)
+        )
+
+        if maska.any():
+            idx = df[maska].index[0]
+        else:
+            nowy = {col: "" for col in WYMAGANE_KOLUMNY + KOLUMNY_STRZALOW}
+            nowy["Nazwisko"] = nazwisko
+            nowy["Zmiana"] = st.session_state.nazwa_zmiany
+            nowy["Typ"] = typ
+            df = pd.concat([df, pd.DataFrame([nowy])], ignore_index=True)
+            idx = df.index[-1]
+
+        df.at[idx, "Status"] = "W TRAKCIE"
+        df.at[idx, "Suma trafień"] = ""
+        df.at[idx, "Ile za pierwszym"] = ""
+
+        for i in range(1, MAX_RZUTKOW + 1):
+            col = f"Strzał_{i}"
+            df.at[idx, col] = strzaly[i - 1] if i <= len(strzaly) else ""
+
+    zapisz_excel(df, path)
+
+
 def zapisz_wyniki_zmiany(path: Path) -> None:
     df = wczytaj_excel(path)
 
@@ -701,6 +745,9 @@ defaults = {
     "aktualny_zawodnik_idx": 0,
     "limit_rzutkow": 20,
     "nazwa_zmiany": "",
+    "reset_wyszukiwarki": 0,
+    "kopia_pobrana": False,
+    "ostatnio_przywrocony_upload": "",
 }
 
 for k, v in defaults.items():
@@ -800,6 +847,47 @@ if not TRYB_ZAWODNIKA:
 
         except Exception as e:
             st.sidebar.error(f"Nie udało się utworzyć pliku zawodów: {e}")
+
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("♻️ Przywróć z kopii")
+
+    upload_backup = st.sidebar.file_uploader(
+        "Wgraj ostatni pobrany Excel:",
+        type=["xlsx"],
+        key="upload_backup_excel",
+    )
+
+    if upload_backup is not None:
+        upload_id = f"{upload_backup.name}_{getattr(upload_backup, 'size', 0)}"
+
+        if st.session_state.get("ostatnio_przywrocony_upload", "") != upload_id:
+            try:
+                # Jeżeli nazwa pliku nie jest zgodna ze schematem aplikacji,
+                # nadajemy bezpieczną nazwę, żeby plik pojawił się na liście zawodów.
+                if upload_backup.name.startswith("trap20_zawody_") and upload_backup.name.endswith(".xlsx"):
+                    backup_name = upload_backup.name
+                else:
+                    znacznik = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    backup_name = f"trap20_zawody_przywrocony_{znacznik}.xlsx"
+
+                backup_path = DATA_DIR / backup_name
+                backup_path.write_bytes(upload_backup.getbuffer())
+
+                # Próba odczytu od razu waliduje, czy to jest poprawny plik Excel dla programu.
+                df_backup = wczytaj_excel(backup_path)
+                zapisz_excel(df_backup, backup_path)
+
+                st.session_state.aktywny_plik = str(backup_path)
+                st.session_state.ostatnio_przywrocony_upload = upload_id
+                zakoncz_i_wroc_do_menu()
+
+                st.sidebar.success(f"Przywrócono plik: {backup_path.name}")
+                st.rerun()
+
+            except Exception as e:
+                st.sidebar.error(f"Nie udało się przywrócić pliku Excel: {e}")
+        else:
+            st.sidebar.info("Ta kopia jest już przywrócona jako aktywny plik.")
 
     pliki = lista_plikow_zawodow()
 
@@ -988,10 +1076,12 @@ if st.session_state.tryb_pracy == "MENU":
         for z in st.session_state.wybrani_zawodnicy
     }
 
+    reset_id = int(st.session_state.get("reset_wyszukiwarki", 0))
+
     filtr = st.text_input(
         "Szukaj zawodnika:",
         placeholder="Wpisz kilka liter nazwiska...",
-        key="filtr_zawodnika",
+        key=f"filtr_zawodnika_{reset_id}",
     ).strip().upper()
 
     dostepni_po_filtrze = []
@@ -1014,7 +1104,7 @@ if st.session_state.tryb_pracy == "MENU":
             "Wybierz zawodnika z listy:",
             options=opcje,
             index=0,
-            key="wybor_zawodnika",
+            key=f"wybor_zawodnika_{reset_id}",
         )
 
         if filtr:
@@ -1078,6 +1168,9 @@ if st.session_state.tryb_pracy == "MENU":
                             "typ": typ,
                         })
 
+                        # Po dodaniu zawodnika czyścimy wyszukiwarkę i wybór z listy.
+                        st.session_state.reset_wyszukiwarki = int(st.session_state.get("reset_wyszukiwarki", 0)) + 1
+
                         st.rerun()
 
     if st.session_state.wybrani_zawodnicy:
@@ -1109,6 +1202,7 @@ if st.session_state.tryb_pracy == "MENU":
             st.session_state.aktualny_strzal = 0
             st.session_state.aktualny_zawodnik_idx = 0
             st.session_state.zapisano_zmiane = ""
+            st.session_state.kopia_pobrana = False
 
             st.session_state.macierz_wynikow = {
                 z["id_unikalne"]: ["-"] * int(limit_rzutkow)
@@ -1221,6 +1315,13 @@ elif st.session_state.tryb_pracy == "STRZELANIE":
             st.session_state.aktualny_zawodnik_idx = 0
             st.session_state.aktualny_strzal += 1
 
+        # Awaryjny zapis bieżących strzałów po każdym kliknięciu.
+        # Chroni przed zwykłym odświeżeniem/resetem sesji Streamlit w trakcie zmiany.
+        try:
+            zapisz_robocze_strzaly_zmiany(path)
+        except Exception as e:
+            st.session_state["blad_autozapisu"] = str(e)
+
     if st.session_state.aktualny_strzal >= limit:
         st.success("🔥 Zmiana zakończona.")
 
@@ -1236,21 +1337,27 @@ elif st.session_state.tryb_pracy == "STRZELANIE":
             except Exception as e:
                 st.error(f"Nie udało się automatycznie zapisać wyników: {e}")
 
-        c1, c2 = st.columns(2)
+        def oznacz_kopie_pobrana():
+            st.session_state.kopia_pobrana = True
 
-        with c1:
+        st.download_button(
+            "💾 Pobierz kopię bezpieczeństwa Excel",
+            data=path.read_bytes(),
+            file_name=path.name,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+            type="primary",
+            on_click=oznacz_kopie_pobrana,
+        )
+
+        if st.session_state.get("kopia_pobrana", False):
+            st.success("Kopia została pobrana. Możesz rozpocząć kolejną zmianę.")
             if st.button("✅ Nowa zmiana", type="primary", use_container_width=True):
+                st.session_state.kopia_pobrana = False
                 zakoncz_i_wroc_do_menu()
                 st.rerun()
-
-        with c2:
-            st.download_button(
-                "⬇️ Pobierz aktywny Excel",
-                data=path.read_bytes(),
-                file_name=path.name,
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
-            )
+        else:
+            st.warning("Najpierw pobierz kopię bezpieczeństwa Excel, potem rozpocznij nową zmianę.")
 
     else:
         aktualny = st.session_state.wybrani_zawodnicy[st.session_state.aktualny_zawodnik_idx]
@@ -1317,6 +1424,11 @@ elif st.session_state.tryb_pracy == "STRZELANIE":
                 if id_u in st.session_state.macierz_wynikow:
                     if 0 <= st.session_state.aktualny_strzal < len(st.session_state.macierz_wynikow[id_u]):
                         st.session_state.macierz_wynikow[id_u][st.session_state.aktualny_strzal] = "-"
+
+                try:
+                    zapisz_robocze_strzaly_zmiany(path)
+                except Exception as e:
+                    st.session_state["blad_autozapisu"] = str(e)
 
                 st.rerun()
 
