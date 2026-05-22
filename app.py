@@ -35,6 +35,11 @@ ARKUSZ_WYNIKI = "Wyniki Szczegółowe"
 ARKUSZ_REZULTATY = "Rezultaty"
 ARKUSZ_REZULTATY_PK = "Rezultaty PK"
 
+# Kolumny techniczne używane do bezpiecznego wznowienia przerwanej zmiany.
+# Zostają w Excelu, ale nie przeszkadzają rankingom ani panelowi zawodnika.
+KOLUMNA_KOLEJNOSC = "Kolejność w zmianie"
+KOLUMNA_LIMIT = "Limit rzutków"
+
 
 # ============================================================
 # STYL
@@ -603,7 +608,7 @@ def zapisz_pusty_start_zmiany(path: Path) -> None:
     """
     df = wczytaj_excel(path)
 
-    for zaw in st.session_state.wybrani_zawodnicy:
+    for kolejnosc, zaw in enumerate(st.session_state.wybrani_zawodnicy, start=1):
         nazwisko = zaw["nazwisko"]
         typ = zaw["typ"]
 
@@ -629,12 +634,16 @@ def zapisz_pusty_start_zmiany(path: Path) -> None:
             df.at[pusty_idx, "Zmiana"] = st.session_state.nazwa_zmiany
             df.at[pusty_idx, "Typ"] = typ
             df.at[pusty_idx, "Status"] = "W TRAKCIE"
+            df.at[pusty_idx, KOLUMNA_KOLEJNOSC] = str(kolejnosc)
+            df.at[pusty_idx, KOLUMNA_LIMIT] = str(st.session_state.limit_rzutkow)
         else:
             nowy = {col: "" for col in WYMAGANE_KOLUMNY + KOLUMNY_STRZALOW}
             nowy["Nazwisko"] = nazwisko
             nowy["Zmiana"] = st.session_state.nazwa_zmiany
             nowy["Typ"] = typ
             nowy["Status"] = "W TRAKCIE"
+            nowy[KOLUMNA_KOLEJNOSC] = str(kolejnosc)
+            nowy[KOLUMNA_LIMIT] = str(st.session_state.limit_rzutkow)
             df = pd.concat([df, pd.DataFrame([nowy])], ignore_index=True)
 
     zapisz_excel(df, path)
@@ -651,7 +660,7 @@ def zapisz_robocze_strzaly_zmiany(path: Path) -> None:
 
     df = wczytaj_excel(path)
 
-    for zaw in st.session_state.wybrani_zawodnicy:
+    for kolejnosc, zaw in enumerate(st.session_state.wybrani_zawodnicy, start=1):
         nazwisko = zaw["nazwisko"]
         typ = zaw["typ"]
         id_u = zaw["id_unikalne"]
@@ -670,10 +679,14 @@ def zapisz_robocze_strzaly_zmiany(path: Path) -> None:
             nowy["Nazwisko"] = nazwisko
             nowy["Zmiana"] = st.session_state.nazwa_zmiany
             nowy["Typ"] = typ
+            nowy[KOLUMNA_KOLEJNOSC] = str(kolejnosc)
+            nowy[KOLUMNA_LIMIT] = str(st.session_state.limit_rzutkow)
             df = pd.concat([df, pd.DataFrame([nowy])], ignore_index=True)
             idx = df.index[-1]
 
         df.at[idx, "Status"] = "W TRAKCIE"
+        df.at[idx, KOLUMNA_KOLEJNOSC] = str(kolejnosc)
+        df.at[idx, KOLUMNA_LIMIT] = str(st.session_state.limit_rzutkow)
         df.at[idx, "Suma trafień"] = ""
         df.at[idx, "Ile za pierwszym"] = ""
 
@@ -687,7 +700,7 @@ def zapisz_robocze_strzaly_zmiany(path: Path) -> None:
 def zapisz_wyniki_zmiany(path: Path) -> None:
     df = wczytaj_excel(path)
 
-    for zaw in st.session_state.wybrani_zawodnicy:
+    for kolejnosc, zaw in enumerate(st.session_state.wybrani_zawodnicy, start=1):
         nazwisko = zaw["nazwisko"]
         typ = zaw["typ"]
         id_u = zaw["id_unikalne"]
@@ -709,10 +722,14 @@ def zapisz_wyniki_zmiany(path: Path) -> None:
             nowy["Nazwisko"] = nazwisko
             nowy["Zmiana"] = st.session_state.nazwa_zmiany
             nowy["Typ"] = typ
+            nowy[KOLUMNA_KOLEJNOSC] = str(kolejnosc)
+            nowy[KOLUMNA_LIMIT] = str(st.session_state.limit_rzutkow)
             df = pd.concat([df, pd.DataFrame([nowy])], ignore_index=True)
             idx = df.index[-1]
 
         df.at[idx, "Status"] = "STANDARD ZAKOŃCZONY" if typ == "Standard" else "PK ZAKOŃCZONE"
+        df.at[idx, KOLUMNA_KOLEJNOSC] = str(kolejnosc)
+        df.at[idx, KOLUMNA_LIMIT] = str(st.session_state.limit_rzutkow)
         df.at[idx, "Suma trafień"] = suma
         df.at[idx, "Ile za pierwszym"] = pierwszy
 
@@ -721,6 +738,149 @@ def zapisz_wyniki_zmiany(path: Path) -> None:
             df.at[idx, col] = strzaly[i - 1] if i <= len(strzaly) else ""
 
     zapisz_excel(df, path)
+
+
+def znajdz_przerwana_zmiane(df_input: pd.DataFrame) -> dict | None:
+    """
+    Szuka w aktywnym Excelu zmiany oznaczonej jako W TRAKCIE.
+    Zwraca dane potrzebne do pokazania przycisku wznowienia.
+    """
+    if df_input.empty or "Status" not in df_input.columns or "Zmiana" not in df_input.columns:
+        return None
+
+    df = normalizuj_naglowki(df_input)
+    robocze = df[df["Status"].str.upper().str.strip() == "W TRAKCIE"].copy()
+
+    if robocze.empty:
+        return None
+
+    # Bierzemy ostatnią/najnowszą zmianę z pliku. Przy normalnej pracy będzie tylko jedna.
+    nazwy_zmian = [z for z in robocze["Zmiana"].dropna().astype(str).unique() if z.strip()]
+    if not nazwy_zmian:
+        return None
+
+    nazwa_zmiany = nazwy_zmian[-1]
+    robocze = robocze[robocze["Zmiana"].astype(str) == nazwa_zmiany].copy()
+
+    limit_series = pd.to_numeric(robocze.get(KOLUMNA_LIMIT, pd.Series(dtype=str)), errors="coerce").dropna()
+    if not limit_series.empty:
+        limit = int(limit_series.iloc[0])
+    else:
+        # Awaryjnie dla starszych kopii, które nie mają jeszcze kolumny Limit rzutków.
+        ostatni_zapisany = 0
+        for i in range(1, MAX_RZUTKOW + 1):
+            col = f"Strzał_{i}"
+            if col in robocze.columns:
+                ma_dane = robocze[col].astype(str).str.strip().replace({"nan": "", "None": ""})
+                if ma_dane.apply(lambda x: x not in ["", "-"]).any():
+                    ostatni_zapisany = i
+        limit = max(20, ostatni_zapisany)
+        limit = min(limit, MAX_RZUTKOW)
+
+    return {
+        "nazwa_zmiany": nazwa_zmiany,
+        "liczba_zawodnikow": len(robocze),
+        "limit": limit,
+    }
+
+
+def wznow_przerwana_zmiane(path: Path, nazwa_zmiany: str | None = None) -> bool:
+    """
+    Odbudowuje session_state z Excela po resecie Streamlit.
+    Przywraca listę zawodników, macierz strzałów i następne pole do wpisania.
+    """
+    df = wczytaj_excel(path)
+    robocze = df[df["Status"].str.upper().str.strip() == "W TRAKCIE"].copy()
+
+    if robocze.empty:
+        return False
+
+    if nazwa_zmiany:
+        robocze = robocze[robocze["Zmiana"].astype(str) == str(nazwa_zmiany)].copy()
+    else:
+        nazwy_zmian = [z for z in robocze["Zmiana"].dropna().astype(str).unique() if z.strip()]
+        if not nazwy_zmian:
+            return False
+        nazwa_zmiany = nazwy_zmian[-1]
+        robocze = robocze[robocze["Zmiana"].astype(str) == str(nazwa_zmiany)].copy()
+
+    if robocze.empty:
+        return False
+
+    if KOLUMNA_KOLEJNOSC in robocze.columns:
+        robocze["_kolejnosc_num"] = pd.to_numeric(robocze[KOLUMNA_KOLEJNOSC], errors="coerce")
+        robocze = robocze.sort_values(["_kolejnosc_num", "Nazwisko"], na_position="last")
+    else:
+        robocze = robocze.sort_index()
+
+    limit_series = pd.to_numeric(robocze.get(KOLUMNA_LIMIT, pd.Series(dtype=str)), errors="coerce").dropna()
+    if not limit_series.empty:
+        limit = int(limit_series.iloc[0])
+    else:
+        ostatni_zapisany = 0
+        for i in range(1, MAX_RZUTKOW + 1):
+            col = f"Strzał_{i}"
+            if col in robocze.columns:
+                ma_dane = robocze[col].astype(str).str.strip().replace({"nan": "", "None": ""})
+                if ma_dane.apply(lambda x: x not in ["", "-"]).any():
+                    ostatni_zapisany = i
+        limit = max(20, ostatni_zapisany)
+        limit = min(limit, MAX_RZUTKOW)
+
+    wybrani = []
+    macierz = {}
+
+    for _, row in robocze.iterrows():
+        nazwisko = str(row.get("Nazwisko", "")).strip().upper()
+        typ = str(row.get("Typ", "Standard")).strip() or "Standard"
+        id_unikalne = f"{nazwisko} [PK]" if typ == "PK" else nazwisko
+
+        if not nazwisko:
+            continue
+
+        wybrani.append({
+            "nazwisko": nazwisko,
+            "id_unikalne": id_unikalne,
+            "typ": typ,
+        })
+
+        strzaly = []
+        for i in range(1, limit + 1):
+            val = str(row.get(f"Strzał_{i}", "")).strip()
+            if val in ["", "nan", "None"]:
+                val = "-"
+            strzaly.append(val)
+        macierz[id_unikalne] = strzaly
+
+    if not wybrani:
+        return False
+
+    aktualny_strzal = limit
+    aktualny_zawodnik_idx = 0
+
+    znaleziono_puste = False
+    for s_idx in range(limit):
+        for z_idx, z in enumerate(wybrani):
+            id_u = z["id_unikalne"]
+            if macierz.get(id_u, [])[s_idx] == "-":
+                aktualny_strzal = s_idx
+                aktualny_zawodnik_idx = z_idx
+                znaleziono_puste = True
+                break
+        if znaleziono_puste:
+            break
+
+    st.session_state.tryb_pracy = "STRZELANIE"
+    st.session_state.wybrani_zawodnicy = wybrani
+    st.session_state.macierz_wynikow = macierz
+    st.session_state.aktualny_strzal = aktualny_strzal
+    st.session_state.aktualny_zawodnik_idx = aktualny_zawodnik_idx
+    st.session_state.limit_rzutkow = limit
+    st.session_state.nazwa_zmiany = str(nazwa_zmiany)
+    st.session_state.zapisano_zmiane = ""
+    st.session_state.kopia_pobrana = False
+
+    return True
 
 def zakoncz_i_wroc_do_menu():
     st.session_state.tryb_pracy = "MENU"
@@ -1065,6 +1225,18 @@ if st.session_state.tryb_pracy == "MENU":
 
     with col_m3:
         st.metric("Zawodnicy w pliku", df_baza["Nazwisko"].nunique())
+
+    przerwana = znajdz_przerwana_zmiane(df_baza)
+    if przerwana and not st.session_state.get("wybrani_zawodnicy"):
+        st.warning(
+            f"Wykryto przerwaną zmianę: {przerwana['nazwa_zmiany']} "
+            f"({przerwana['liczba_zawodnikow']} zawodników, {przerwana['limit']} rzutków)."
+        )
+        if st.button("▶️ Wznów przerwaną zmianę", type="primary", use_container_width=True):
+            if wznow_przerwana_zmiane(path, przerwana["nazwa_zmiany"]):
+                st.rerun()
+            else:
+                st.error("Nie udało się wznowić przerwanej zmiany z aktywnego pliku.")
 
     st.markdown("---")
     st.subheader("📋 Skład zmiany")
