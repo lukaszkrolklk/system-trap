@@ -146,24 +146,50 @@ st.markdown(
     }
 
     .current-player {
-        background: #1e293b;
-        border: 2px solid #38bdf8;
+        background: #111827;
+        border: 1px solid #334155;
         color: white;
-        padding: 10px 14px;
-        border-radius: 12px;
-        margin: 10px 0 10px 0;
+        padding: 8px 12px;
+        border-radius: 10px;
+        margin: 8px 0 10px 0;
     }
 
     .current-player h3 {
-        margin: 0 0 4px 0;
-        font-size: 20px;
+        margin: 0;
+        font-size: 15px;
         color: white;
+        display: inline;
     }
 
     .current-player .current-line {
-        font-size: 15px;
+        font-size: 14px;
         font-weight: 800;
         color: white;
+        display: inline;
+        margin-left: 10px;
+    }
+
+    .file-info-footer {
+        margin-top: 18px;
+        padding: 10px 12px;
+        border: 1px solid rgba(148, 163, 184, 0.22);
+        border-radius: 10px;
+        color: #64748b;
+        font-size: 13px;
+        background: rgba(15, 23, 42, 0.25);
+    }
+
+    .file-info-footer code {
+        color: #22c55e;
+        background: rgba(34, 197, 94, 0.08);
+        padding: 2px 6px;
+        border-radius: 6px;
+    }
+
+    .danger-zone {
+        margin-top: 28px;
+        padding-top: 16px;
+        border-top: 1px solid rgba(239, 68, 68, 0.35);
     }
 
     /* Telefon poziomo / mały tablet */
@@ -225,16 +251,19 @@ st.markdown(
         }
 
         .current-player {
-            padding: 7px 10px;
+            padding: 6px 8px;
             margin: 7px 0 7px 0;
         }
 
         .current-player h3 {
-            font-size: 15px;
+            font-size: 13px;
         }
 
         .current-player .current-line {
             font-size: 12px;
+            display: block;
+            margin-left: 0;
+            margin-top: 3px;
         }
 
         div[data-testid="stHorizontalBlock"] {
@@ -801,12 +830,6 @@ else:
 # GŁÓWNY WIDOK
 # ============================================================
 
-st.markdown('<div class="main-title">🎯 TRAP20 — System Punktacji</div>', unsafe_allow_html=True)
-st.markdown(
-    '<div class="subtitle">Google służy tylko do pobrania listy. Cała praca odbywa się na aktywnym pliku Excel zawodów.</div>',
-    unsafe_allow_html=True,
-)
-
 path = aktywny_path()
 
 if path is None:
@@ -815,9 +838,17 @@ if path is None:
 
 df_baza = wczytaj_excel(path)
 
-st.caption(f"Aktywny plik: `{path.name}`")
 
-
+def pokaz_info_o_pliku_na_dole(path: Path) -> None:
+    st.markdown(
+        f"""
+<div class="file-info-footer">
+    <div>Google służy tylko do pobrania listy. Cała praca odbywa się na aktywnym pliku Excel zawodów.</div>
+    <div style="margin-top: 6px;">Aktywny plik: <code>{path.name}</code></div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
 
 
 # ============================================================
@@ -995,7 +1026,7 @@ if st.session_state.tryb_pracy == "MENU":
     with tab3:
         st.dataframe(df_baza, use_container_width=True, hide_index=True)
 
-
+    pokaz_info_o_pliku_na_dole(path)
 
 
 # ============================================================
@@ -1118,20 +1149,6 @@ elif st.session_state.tryb_pracy == "STRZELANIE":
     else:
         aktualny = st.session_state.wybrani_zawodnicy[st.session_state.aktualny_zawodnik_idx]
 
-        st.markdown(
-            f"""
-<div class="current-player">
-    <h3>📣 Bieżący strzał</h3>
-    <div class="current-line">
-        Stanowisko {st.session_state.aktualny_zawodnik_idx + 1}: {aktualny["id_unikalne"]}
-        &nbsp; | &nbsp;
-        Strzał {st.session_state.aktualny_strzal + 1} z {limit}
-    </div>
-</div>
-""",
-            unsafe_allow_html=True,
-        )
-
         b1, b2, b3 = st.columns(3)
 
         with b1:
@@ -1159,17 +1176,26 @@ elif st.session_state.tryb_pracy == "STRZELANIE":
                 args=("O",),
             )
 
+        st.markdown(
+            f"""
+<div class="current-player">
+    <h3>📣 Bieżący strzał</h3>
+    <div class="current-line">
+        Stanowisko {st.session_state.aktualny_zawodnik_idx + 1}: {aktualny["id_unikalne"]}
+        &nbsp; | &nbsp;
+        Strzał {st.session_state.aktualny_strzal + 1} z {limit}
+    </div>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+
     st.markdown("---")
 
-    cnav1, cnav2 = st.columns(2)
-
-    with cnav1:
-        if st.button("⬅️ Anuluj zmianę i wróć do menu"):
-            zakoncz_i_wroc_do_menu()
-            st.rerun()
+    cnav1, cnav2, cnav3 = st.columns([1, 1, 1])
 
     with cnav2:
-        if st.button("↩️ Cofnij ostatni wpis"):
+        if st.button("↩️ Cofnij ostatni wpis", use_container_width=True):
             if st.session_state.aktualny_strzal == 0 and st.session_state.aktualny_zawodnik_idx == 0:
                 st.warning("Nie ma czego cofnąć.")
             else:
@@ -1187,3 +1213,13 @@ elif st.session_state.tryb_pracy == "STRZELANIE":
                         st.session_state.macierz_wynikow[id_u][st.session_state.aktualny_strzal] = "-"
 
                 st.rerun()
+
+    st.markdown('<div class="danger-zone"></div>', unsafe_allow_html=True)
+
+    c_cancel1, c_cancel2, c_cancel3 = st.columns([1, 1, 1])
+    with c_cancel3:
+        if st.button("⬅️ Anuluj zmianę i wróć do menu", use_container_width=True):
+            zakoncz_i_wroc_do_menu()
+            st.rerun()
+
+    pokaz_info_o_pliku_na_dole(path)
