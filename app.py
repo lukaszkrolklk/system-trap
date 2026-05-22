@@ -709,121 +709,145 @@ for k, v in defaults.items():
 
 
 # ============================================================
+# TRYB WIDOKU: ADMIN / ZAWODNIK
+# ============================================================
+
+view_param = st.query_params.get("view", "admin")
+if isinstance(view_param, list):
+    view_param = view_param[0] if view_param else "admin"
+
+TRYB_ZAWODNIKA = str(view_param).strip().lower() in ["zawodnik", "wyniki", "public"]
+
+if TRYB_ZAWODNIKA:
+    st.markdown(
+        """
+<style>
+    [data-testid="stSidebar"] {display: none;}
+    [data-testid="collapsedControl"] {display: none;}
+    .block-container {padding-top: 0.7rem;}
+</style>
+""",
+        unsafe_allow_html=True,
+    )
+
+
+# ============================================================
 # SIDEBAR
 # ============================================================
 
-st.sidebar.header("📁 Plik zawodów")
+if not TRYB_ZAWODNIKA:
+    st.sidebar.header("📁 Plik zawodów")
 
-# ------------------------------------------------------------
-# KODY LIST KLUBOWYCH
-# ------------------------------------------------------------
-# To są wygodne skróty dla sędziów.
-# Nie jest to zabezpieczenie, tylko prosty sposób, żeby nie wpisywać długiego linku.
-KODY_LIST = {
-    "snajper": "https://docs.google.com/spreadsheets/d/1I8OGAXZEDWY3wgP_hKaepQF390BCUwxMBOrcPDJmlhA/edit?gid=0#gid=0",
-}
+    # ------------------------------------------------------------
+    # KODY LIST KLUBOWYCH
+    # ------------------------------------------------------------
+    # To są wygodne skróty dla sędziów.
+    # Nie jest to zabezpieczenie, tylko prosty sposób, żeby nie wpisywać długiego linku.
+    KODY_LIST = {
+        "snajper": "https://docs.google.com/spreadsheets/d/1I8OGAXZEDWY3wgP_hKaepQF390BCUwxMBOrcPDJmlhA/edit?gid=0#gid=0",
+    }
 
-kod_listy = st.sidebar.text_input(
-    "Kod listy klubowej:",
-    placeholder="np. Ala ma kota a kot ma strzelbę ;)",
-).strip().lower()
+    kod_listy = st.sidebar.text_input(
+        "Kod listy klubowej:",
+        placeholder="np. Ala ma kota a kot ma strzelbę ;)",
+    ).strip().lower()
 
-uzyj_wlasnego_linku = st.sidebar.checkbox("Użyj własnego linku Google Sheets")
+    uzyj_wlasnego_linku = st.sidebar.checkbox("Użyj własnego linku Google Sheets")
 
-wlasny_link = ""
+    wlasny_link = ""
 
-if uzyj_wlasnego_linku:
-    wlasny_link = st.sidebar.text_input(
-        "Publiczny link Google Sheets do odczytu:",
-        value="",
-        placeholder="https://docs.google.com/spreadsheets/d/...",
-        key="custom_google_link",
-    ).strip()
+    if uzyj_wlasnego_linku:
+        wlasny_link = st.sidebar.text_input(
+            "Publiczny link Google Sheets do odczytu:",
+            value="",
+            placeholder="https://docs.google.com/spreadsheets/d/...",
+            key="custom_google_link",
+        ).strip()
 
-if st.sidebar.button("📥 Utwórz NOWY plik zawodów", use_container_width=True):
-    try:
-        link_do_pobrania = ""
-
-        if kod_listy:
-            if kod_listy not in KODY_LIST:
-                st.sidebar.error("Nieznany kod listy klubowej.")
-                st.stop()
-
-            link_do_pobrania = KODY_LIST[kod_listy]
-
-        elif uzyj_wlasnego_linku:
-            if not wlasny_link:
-                st.sidebar.error("Wklej własny link Google Sheets.")
-                st.stop()
-
-            link_do_pobrania = wlasny_link
-
-        else:
-            st.sidebar.error("Wpisz kod listy klubowej albo zaznacz własny link.")
-            st.stop()
-
-        df_google = pobierz_liste_z_google(link_do_pobrania)
-        nowy_plik = nazwa_nowego_pliku()
-        zapisz_excel(df_google, nowy_plik)
-
-        st.session_state.aktywny_plik = str(nowy_plik)
-        if "custom_google_link" in st.session_state:
-            st.session_state.custom_google_link = ""
-        zakoncz_i_wroc_do_menu()
-
-        st.sidebar.success(f"Utworzono plik: {nowy_plik.name}")
-        st.rerun()
-
-    except Exception as e:
-        st.sidebar.error(f"Nie udało się utworzyć pliku zawodów: {e}")
-
-pliki = lista_plikow_zawodow()
-
-if pliki:
-    nazwy = [p.name for p in pliki]
-
-    aktualny = aktywny_path()
-    aktualna_nazwa = aktualny.name if aktualny else nazwy[0]
-    index = nazwy.index(aktualna_nazwa) if aktualna_nazwa in nazwy else 0
-
-    wybor_pliku = st.sidebar.selectbox(
-        "Aktywny plik zawodów:",
-        nazwy,
-        index=index,
-    )
-
-    wybrany_path = DATA_DIR / wybor_pliku
-
-    if str(wybrany_path) != st.session_state.aktywny_plik:
-        st.session_state.aktywny_plik = str(wybrany_path)
-        zakoncz_i_wroc_do_menu()
-        st.rerun()
-
-    st.sidebar.download_button(
-        "⬇️ Pobierz aktywny Excel",
-        data=wybrany_path.read_bytes(),
-        file_name=wybrany_path.name,
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True,
-    )
-
-    st.sidebar.markdown("---")
-
-    if st.sidebar.button("🗑️ Usuń aktywny plik zawodów", use_container_width=True):
+    if st.sidebar.button("📥 Utwórz NOWY plik zawodów", use_container_width=True):
         try:
-            if wybrany_path.exists():
-                wybrany_path.unlink()
+            link_do_pobrania = ""
 
-            st.session_state.aktywny_plik = ""
+            if kod_listy:
+                if kod_listy not in KODY_LIST:
+                    st.sidebar.error("Nieznany kod listy klubowej.")
+                    st.stop()
+
+                link_do_pobrania = KODY_LIST[kod_listy]
+
+            elif uzyj_wlasnego_linku:
+                if not wlasny_link:
+                    st.sidebar.error("Wklej własny link Google Sheets.")
+                    st.stop()
+
+                link_do_pobrania = wlasny_link
+
+            else:
+                st.sidebar.error("Wpisz kod listy klubowej albo zaznacz własny link.")
+                st.stop()
+
+            df_google = pobierz_liste_z_google(link_do_pobrania)
+            nowy_plik = nazwa_nowego_pliku()
+            zapisz_excel(df_google, nowy_plik)
+
+            st.session_state.aktywny_plik = str(nowy_plik)
+            if "custom_google_link" in st.session_state:
+                st.session_state.custom_google_link = ""
             zakoncz_i_wroc_do_menu()
 
-            st.sidebar.success("Usunięto aktywny plik zawodów.")
+            st.sidebar.success(f"Utworzono plik: {nowy_plik.name}")
             st.rerun()
 
         except Exception as e:
-            st.sidebar.error(f"Nie udało się usunąć pliku: {e}")
-else:
-    st.sidebar.warning("Brak pliku zawodów. Pobierz listę z Google.")
+            st.sidebar.error(f"Nie udało się utworzyć pliku zawodów: {e}")
+
+    pliki = lista_plikow_zawodow()
+
+    if pliki:
+        nazwy = [p.name for p in pliki]
+
+        aktualny = aktywny_path()
+        aktualna_nazwa = aktualny.name if aktualny else nazwy[0]
+        index = nazwy.index(aktualna_nazwa) if aktualna_nazwa in nazwy else 0
+
+        wybor_pliku = st.sidebar.selectbox(
+            "Aktywny plik zawodów:",
+            nazwy,
+            index=index,
+        )
+
+        wybrany_path = DATA_DIR / wybor_pliku
+
+        if str(wybrany_path) != st.session_state.aktywny_plik:
+            st.session_state.aktywny_plik = str(wybrany_path)
+            zakoncz_i_wroc_do_menu()
+            st.rerun()
+
+        st.sidebar.download_button(
+            "⬇️ Pobierz aktywny Excel",
+            data=wybrany_path.read_bytes(),
+            file_name=wybrany_path.name,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+        )
+
+        st.sidebar.markdown("---")
+
+        if st.sidebar.button("🗑️ Usuń aktywny plik zawodów", use_container_width=True):
+            try:
+                if wybrany_path.exists():
+                    wybrany_path.unlink()
+
+                st.session_state.aktywny_plik = ""
+                zakoncz_i_wroc_do_menu()
+
+                st.sidebar.success("Usunięto aktywny plik zawodów.")
+                st.rerun()
+
+            except Exception as e:
+                st.sidebar.error(f"Nie udało się usunąć pliku: {e}")
+    else:
+        st.sidebar.warning("Brak pliku zawodów. Pobierz listę z Google.")
 
 
 # ============================================================
@@ -849,6 +873,88 @@ def pokaz_info_o_pliku_na_dole(path: Path) -> None:
 """,
         unsafe_allow_html=True,
     )
+
+
+def html_strzaly_dla_podgladu(row: pd.Series) -> str:
+    html = ""
+    for i in range(1, MAX_RZUTKOW + 1):
+        val = str(row.get(f"Strzał_{i}", "")).strip()
+        if not val or val in ["-", "nan", "None"]:
+            continue
+
+        if val == "/":
+            klasa = "shot-t1"
+        elif val == "X":
+            klasa = "shot-t2"
+        elif val == "O":
+            klasa = "shot-miss"
+        else:
+            klasa = "shot-blank"
+
+        html += f'<span class="shot-box {klasa}">{val}</span>'
+        if i % 5 == 0:
+            html += "&nbsp;&nbsp;"
+
+    return html if html else "<span style='color:#94a3b8;'>Brak zapisanych strzałów</span>"
+
+
+def pokaz_panel_zawodnika(df: pd.DataFrame, path: Path) -> None:
+    st.markdown('<div class="main-title">📊 TRAP20 — wyniki zawodów</div>', unsafe_allow_html=True)
+    st.caption("Publiczny podgląd dla zawodników. Ten widok nie pozwala edytować wyników.")
+
+    if st.button("🔄 Odśwież wyniki"):
+        st.rerun()
+
+    st.markdown("---")
+
+    tab1, tab2, tab3 = st.tabs(["🏆 Ranking Standard", "🎯 Ranking PK", "🔎 Sprawdź zawodnika"])
+
+    with tab1:
+        st.dataframe(zbuduj_ranking(df, "Standard"), use_container_width=True, hide_index=True)
+
+    with tab2:
+        st.dataframe(zbuduj_ranking(df, "PK"), use_container_width=True, hide_index=True)
+
+    with tab3:
+        szukaj = st.text_input(
+            "Wpisz nazwisko zawodnika:",
+            placeholder="np. KOWALSKI",
+            key="public_szukaj_zawodnika",
+        ).strip().upper()
+
+        df_pokaz = normalizuj_naglowki(df)
+        df_pokaz = df_pokaz[df_pokaz["Suma trafień"].apply(czy_ma_wynik)].copy()
+
+        if szukaj:
+            df_pokaz = df_pokaz[df_pokaz["Nazwisko"].str.upper().str.contains(szukaj, na=False)]
+
+        if df_pokaz.empty:
+            st.info("Brak zapisanych wyników dla podanego filtra.")
+        else:
+            for _, row in df_pokaz.sort_values(["Nazwisko", "Typ", "Zmiana"]).iterrows():
+                suma = str(row.get("Suma trafień", "")).strip() or "0"
+                pierwszy = str(row.get("Ile za pierwszym", "")).strip() or "0"
+                st.markdown(
+                    f"""
+<div class="player-row">
+    <div class="player-stand">{row.get('Zmiana', '')}</div>
+    <div>
+        <div class="player-name">{row.get('Nazwisko', '')}</div>
+        <div class="player-type">{row.get('Typ', '')}</div>
+    </div>
+    <div class="player-shots">{html_strzaly_dla_podgladu(row)}</div>
+    <div class="player-sum">{suma} / {pierwszy}</div>
+</div>
+""",
+                    unsafe_allow_html=True,
+                )
+
+    pokaz_info_o_pliku_na_dole(path)
+
+
+if TRYB_ZAWODNIKA:
+    pokaz_panel_zawodnika(df_baza, path)
+    st.stop()
 
 
 # ============================================================
