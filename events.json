@@ -1,13 +1,13 @@
 {
   "_admin": {
-    "password": "TRAPADMIN2026"
+    "password": "TRAPADMIN"
   },
 
   "snajper": {
     "enabled": true,
-    "event_id": "snajper_lublin_20260620",
-    "nazwa": "Puchar Snajpera - Lublin",
-    "google_sheet": "TU_WKLEJ_LINK_GOOGLE",
+    "event_id": "Snajper",
+    "nazwa": "Puchar",
+    "google_sheet": "https://docs.google.com/spreadsheets/d/1I8OGAXZEDWY3wgP_hKaepQF390BCUwxMBOrcPDJmlhA/edit?usp=sharing",
     "aktywny_od": "",
     "aktywny_do": "",
     "pk_wymaga_standard": false
