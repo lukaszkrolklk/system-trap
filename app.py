@@ -2184,4 +2184,3 @@ elif st.session_state.tryb_pracy == "STRZELANIE":
             zakoncz_i_wroc_do_menu()
             st.rerun()
 
-    pokaz_info_o_pliku_na_dole(path)
