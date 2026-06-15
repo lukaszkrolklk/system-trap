@@ -471,6 +471,12 @@ def pokaz_panel_administratora() -> None:
                 "aktywny_od": "",
                 "aktywny_do": "",
                 "pk_wymaga_standard": False,
+                "konkurencje": {
+                    "TRAP10": 10,
+                    "TRAP20": 20,
+                    "PK": 20,
+                    "STANDARD": 20
+                },
             }
             kod0 = ""
         else:
@@ -494,28 +500,67 @@ def pokaz_panel_administratora() -> None:
                 value=bool(cfg0.get("pk_wymaga_standard", False)),
             )
 
+            limity_konkurencji_txt = st.text_area(
+                "Limity rzutków dla konkurencji / JSON:",
+                value=json.dumps(
+                    cfg0.get(
+                        "konkurencje",
+                        {
+                            "TRAP10": 10,
+                            "TRAP20": 20,
+                            "PK": 20,
+                            "STANDARD": 20
+                        },
+                    ),
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                height=150,
+                help='Przykład: {"TRAP10": 10, "TRAP20": 20, "PK": 20}. Limit blokuje ręczną zmianę liczby rzutków przez sędziego.',
+            )
+
             submitted = st.form_submit_button("💾 Zapisz kod zawodów", type="primary")
 
         if submitted:
             if not kod:
                 st.error("Kod zawodów nie może być pusty.")
             else:
-                if not event_id:
-                    event_id = kod
+                try:
+                    limity_konkurencji = json.loads(limity_konkurencji_txt.strip() or "{}")
 
-                events[kod] = {
-                    "enabled": bool(enabled),
-                    "event_id": slugify_event_id(event_id),
-                    "nazwa": nazwa.strip() or kod,
-                    "google_sheet": google_sheet.strip(),
-                    "aktywny_od": aktywny_od.strip(),
-                    "aktywny_do": aktywny_do.strip(),
-                    "pk_wymaga_standard": bool(pk_wymaga_standard),
-                }
+                    if not isinstance(limity_konkurencji, dict):
+                        raise ValueError("Limity konkurencji muszą być obiektem JSON.")
 
-                zapisz_events(events)
-                st.success(f"Zapisano kod: {kod}")
-                st.rerun()
+                    limity_konkurencji = {
+                        normalizuj_konkurencje(k): int(v)
+                        for k, v in limity_konkurencji.items()
+                        if str(k).strip()
+                    }
+
+                    for k, v in limity_konkurencji.items():
+                        if not (1 <= int(v) <= MAX_RZUTKOW):
+                            raise ValueError(f"Limit dla {k} musi być od 1 do {MAX_RZUTKOW}.")
+
+                    if not event_id:
+                        event_id = kod
+
+                    events[kod] = {
+                        "enabled": bool(enabled),
+                        "event_id": slugify_event_id(event_id),
+                        "nazwa": nazwa.strip() or kod,
+                        "google_sheet": google_sheet.strip(),
+                        "aktywny_od": aktywny_od.strip(),
+                        "aktywny_do": aktywny_do.strip(),
+                        "pk_wymaga_standard": bool(pk_wymaga_standard),
+                        "konkurencje": limity_konkurencji,
+                    }
+
+                    zapisz_events(events)
+                    st.success(f"Zapisano kod: {kod}")
+                    st.rerun()
+
+                except Exception as e:
+                    st.error(f"Nie zapisano kodu. Błąd w limitach konkurencji: {e}")
 
         st.markdown("#### Zmiana hasła administratora")
 
@@ -687,6 +732,29 @@ def odczytaj_limit_z_konkurencji(konkurencja: str, domyslny: int = 20) -> int:
         if val in [10, 15, 20, 25]:
             return val
     return domyslny
+
+
+def limit_dla_konkurencji(konkurencja: str, domyslny: int = 20) -> int:
+    """
+    Limit rzutków wynika z konfiguracji eventu, a nie z dowolnego wyboru sędziego.
+    Najpierw czytamy st.session_state.event_cfg["konkurencje"], np. {"TRAP10": 10, "PK": 20}.
+    Jeżeli nie ma konfiguracji, próbujemy wyciągnąć limit z nazwy konkurencji, np. TRAP10 -> 10.
+    """
+    konkurencja_norm = normalizuj_konkurencje(konkurencja)
+    cfg = st.session_state.get("event_cfg", {}) or {}
+    limity = cfg.get("konkurencje", {}) if isinstance(cfg, dict) else {}
+
+    if isinstance(limity, dict):
+        for key, value in limity.items():
+            if normalizuj_konkurencje(key) == konkurencja_norm:
+                try:
+                    limit = int(value)
+                    if 1 <= limit <= MAX_RZUTKOW:
+                        return limit
+                except Exception:
+                    pass
+
+    return odczytaj_limit_z_konkurencji(konkurencja_norm, domyslny)
 
 
 def normalizuj_konkurencje(wartosc: str) -> str:
@@ -1242,6 +1310,48 @@ def wznow_przerwana_zmiane(path: Path, nazwa_zmiany: str | None = None) -> bool:
     return True
 
 
+def anuluj_przerwana_zmiane(path: Path, nazwa_zmiany: str) -> int:
+    """
+    Anuluje roboczą zmianę W TRAKCIE.
+    Zostawia zawodników i konkurencję na liście startowej, ale czyści zmianę, status i strzały.
+    Dzięki temu komunikat o wznowieniu znika, a starty wracają do wyboru.
+    """
+    df = wczytaj_excel(path)
+
+    maska = (
+        (df["Status"].str.upper().str.strip() == "W TRAKCIE")
+        & (df["Zmiana"].astype(str) == str(nazwa_zmiany))
+    )
+
+    ile = int(maska.sum())
+
+    if ile == 0:
+        return 0
+
+    for idx in df[maska].index:
+        df.at[idx, "Zmiana"] = ""
+        df.at[idx, "Status"] = ""
+        df.at[idx, "Suma trafień"] = ""
+        df.at[idx, "Ile za pierwszym"] = ""
+        df.at[idx, KOLUMNA_KOLEJNOSC] = ""
+        df.at[idx, KOLUMNA_LIMIT] = ""
+
+        for i in range(1, MAX_RZUTKOW + 1):
+            df.at[idx, f"Strzał_{i}"] = ""
+
+    zapisz_excel(df, path)
+
+    st.session_state.wybrani_zawodnicy = []
+    st.session_state.macierz_wynikow = {}
+    st.session_state.aktualny_strzal = 0
+    st.session_state.aktualny_zawodnik_idx = 0
+    st.session_state.zapisano_zmiane = ""
+    st.session_state.kopia_pobrana = False
+    st.session_state.reset_wyszukiwarki = int(st.session_state.get("reset_wyszukiwarki", 0)) + 1
+
+    return ile
+
+
 def zakoncz_i_wroc_do_menu():
     st.session_state.tryb_pracy = "MENU"
     st.session_state.wybrani_zawodnicy = []
@@ -1685,17 +1795,23 @@ if st.session_state.tryb_pracy == "MENU":
             index=index_konk,
         )
 
-    suggested_limit = odczytaj_limit_z_konkurencji(konkurencja_zmiany, 20)
+    suggested_limit = limit_dla_konkurencji(konkurencja_zmiany, 20)
 
     with col_m3:
         opcje_limitow = [10, 15, 20, 25]
-        limit_index = opcje_limitow.index(suggested_limit) if suggested_limit in opcje_limitow else 2
+        if suggested_limit not in opcje_limitow:
+            opcje_limitow = sorted(set(opcje_limitow + [int(suggested_limit)]))
+
+        limit_index = opcje_limitow.index(int(suggested_limit))
 
         limit_rzutkow = st.selectbox(
             "Liczba rzutków:",
             opcje_limitow,
             index=limit_index,
+            disabled=True,
+            help="Limit wynika z konfiguracji konkurencji w events.json / panelu administratora.",
         )
+        st.caption("Limit jest przypisany do konkurencji.")
 
     with col_m4:
         st.metric("Zawodnicy", df_baza["Nazwisko"].nunique())
@@ -1707,11 +1823,23 @@ if st.session_state.tryb_pracy == "MENU":
             f"— {przerwana.get('konkurencja', '')} "
             f"({przerwana['liczba_zawodnikow']} zawodników, {przerwana['limit']} rzutków)."
         )
-        if st.button("▶️ Wznów przerwaną zmianę", type="primary", use_container_width=True):
-            if wznow_przerwana_zmiane(path, przerwana["nazwa_zmiany"]):
-                st.rerun()
-            else:
-                st.error("Nie udało się wznowić przerwanej zmiany z aktywnego pliku.")
+        c_wznow, c_anuluj = st.columns(2)
+
+        with c_wznow:
+            if st.button("▶️ Wznów przerwaną zmianę", type="primary", use_container_width=True):
+                if wznow_przerwana_zmiane(path, przerwana["nazwa_zmiany"]):
+                    st.rerun()
+                else:
+                    st.error("Nie udało się wznowić przerwanej zmiany z aktywnego pliku.")
+
+        with c_anuluj:
+            if st.button("🧹 Anuluj przerwaną zmianę", use_container_width=True):
+                ile = anuluj_przerwana_zmiane(path, przerwana["nazwa_zmiany"])
+                if ile:
+                    st.success(f"Anulowano przerwaną zmianę. Wyczyszczono {ile} startów roboczych.")
+                    st.rerun()
+                else:
+                    st.info("Nie znaleziono roboczych startów do anulowania.")
 
     st.markdown("---")
     st.subheader("📋 Skład zmiany")
