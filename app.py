@@ -1497,9 +1497,8 @@ if not TRYB_ZAWODNIKA:
     if st.session_state.get("event_name"):
         st.sidebar.caption(f"Aktywne zawody: {st.session_state.event_name}")
         st.sidebar.caption(f"ID: {aktywny_event_id()}")
-        
-    if st.session_state.get("event_name"):
-    pokaz_qr_panel_zawodnika(aktywny_event_id())
+    
+        pokaz_qr_panel_zawodnika(aktywny_event_id())
 
     kod_listy = st.sidebar.text_input(
         "Kod zawodów:",
