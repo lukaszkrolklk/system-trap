@@ -2064,7 +2064,12 @@ if st.session_state.tryb_pracy == "MENU":
                             "konkurencja": konkurencja,
                         })
 
-                        st.session_state.reset_wyszukiwarki = int(st.session_state.get("reset_wyszukiwarki", 0)) + 1
+                        st.session_state.reczny_zawodnik = ""
+
+                        st.session_state.reset_wyszukiwarki = int(
+                            st.session_state.get("reset_wyszukiwarki", 0)
+                        ) + 1
+
                         st.rerun()
 
     if st.session_state.wybrani_zawodnicy:
