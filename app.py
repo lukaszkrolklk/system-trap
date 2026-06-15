@@ -595,6 +595,61 @@ def pokaz_panel_administratora() -> None:
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True,
                 )
+                                st.markdown("---")
+                st.markdown("#### 🗑️ Usuwanie archiwum")
+
+                wybrany_opis = wybor_pliku
+                czy_archiwum = wybrany_opis.startswith("ARCHIWUM |")
+
+                if czy_archiwum:
+                    potwierdz_usuniecie = st.checkbox(
+                        f"Potwierdzam usunięcie pliku: {file_path.name}",
+                        key=f"confirm_delete_file_{file_path.name}",
+                    )
+
+                    if potwierdz_usuniecie:
+                        if st.button("🗑️ Usuń wybrany plik archiwalny", use_container_width=True):
+                            try:
+                                file_path.unlink()
+                                st.success(f"Usunięto plik archiwalny: {file_path.name}")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Nie udało się usunąć pliku: {e}")
+                else:
+                    st.info("Usuwanie jest dostępne tylko dla plików z ARCHIWUM. Aktywnych zawodów nie usuwamy.")
+
+                st.markdown("#### ⚠️ Wyczyść całe archiwum eventu")
+
+                event_id_do_czyszczenia = st.selectbox(
+                    "Wybierz event_id do wyczyszczenia archiwum:",
+                    sorted({r["event_id"] for r in wszystkie_pliki if r["Typ"] == "ARCHIWUM"}),
+                    key="event_id_clear_archive",
+                )
+
+                if event_id_do_czyszczenia:
+                    arch_dir = ARCHIWUM_DIR / event_id_do_czyszczenia
+                    liczba_archiwum = len(list(arch_dir.glob("*.xlsx"))) if arch_dir.exists() else 0
+
+                    st.warning(
+                        f"To usunie {liczba_archiwum} plików z archiwum eventu: {event_id_do_czyszczenia}"
+                    )
+
+                    potwierdz_cale = st.checkbox(
+                        f"Potwierdzam wyczyszczenie całego archiwum eventu {event_id_do_czyszczenia}",
+                        key=f"confirm_clear_archive_{event_id_do_czyszczenia}",
+                    )
+
+                    if potwierdz_cale:
+                        if st.button("🗑️ Wyczyść archiwum tego eventu", use_container_width=True):
+                            try:
+                                if arch_dir.exists():
+                                    for plik in arch_dir.glob("*.xlsx"):
+                                        plik.unlink()
+
+                                st.success(f"Wyczyszczono archiwum eventu: {event_id_do_czyszczenia}")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Nie udało się wyczyścić archiwum: {e}")
         else:
             st.info("Brak plików aktywnych i archiwalnych.")
 
