@@ -7,6 +7,8 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+import qrcode
+from io import BytesIO
 
 # ============================================================
 # KONFIGURACJA
@@ -685,6 +687,30 @@ def ustaw_event(event_id: str, nazwa: str = "", cfg: dict | None = None) -> None
 def aktywny_event_id() -> str:
     return slugify_event_id(st.session_state.get("event_id", "default"))
 
+def pokaz_qr_panel_zawodnika(event_id: str):
+
+    url = (
+        "https://system-trap-ud8ffzmuwxrxsnzm7rbvlq.streamlit.app/"
+        f"?event={event_id}&view=zawodnik"
+    )
+
+    with st.sidebar.expander("📱 QR dla zawodników", expanded=False):
+
+        st.write("Link do panelu zawodnika:")
+
+        st.code(url)
+
+        qr = qrcode.make(url)
+
+        buffer = BytesIO()
+        qr.save(buffer, format="PNG")
+        buffer.seek(0)
+
+        st.image(
+            buffer,
+            caption="Skanuj telefonem",
+            use_container_width=True,
+        )
 
 def aktywny_event_dir() -> Path:
     path = DATA_DIR / aktywny_event_id()
@@ -1471,6 +1497,9 @@ if not TRYB_ZAWODNIKA:
     if st.session_state.get("event_name"):
         st.sidebar.caption(f"Aktywne zawody: {st.session_state.event_name}")
         st.sidebar.caption(f"ID: {aktywny_event_id()}")
+        
+    if st.session_state.get("event_name"):
+    pokaz_qr_panel_zawodnika(aktywny_event_id())
 
     kod_listy = st.sidebar.text_input(
         "Kod zawodów:",
