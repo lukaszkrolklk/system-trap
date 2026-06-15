@@ -584,9 +584,13 @@ def pokaz_panel_administratora() -> None:
                 for r in wszystkie_pliki
             }
 
-            wybor_pliku = st.selectbox("Wybierz plik do pobrania:", list(opis_do_sciezki.keys()))
+            wybor_pliku = st.selectbox(
+                "Wybierz plik:",
+                list(opis_do_sciezki.keys())
+            )
 
             file_path = Path(opis_do_sciezki[wybor_pliku])
+
             if file_path.exists():
                 st.download_button(
                     "⬇️ Pobierz wybrany Excel",
@@ -595,11 +599,11 @@ def pokaz_panel_administratora() -> None:
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True,
                 )
-                                st.markdown("---")
-                st.markdown("#### 🗑️ Usuwanie archiwum")
 
-                wybrany_opis = wybor_pliku
-                czy_archiwum = wybrany_opis.startswith("ARCHIWUM |")
+                st.markdown("---")
+                st.markdown("#### 🗑️ Usuń wybrany plik archiwalny")
+
+                czy_archiwum = wybor_pliku.startswith("ARCHIWUM |")
 
                 if czy_archiwum:
                     potwierdz_usuniecie = st.checkbox(
@@ -618,15 +622,22 @@ def pokaz_panel_administratora() -> None:
                 else:
                     st.info("Usuwanie jest dostępne tylko dla plików z ARCHIWUM. Aktywnych zawodów nie usuwamy.")
 
+                st.markdown("---")
                 st.markdown("#### ⚠️ Wyczyść całe archiwum eventu")
 
-                event_id_do_czyszczenia = st.selectbox(
-                    "Wybierz event_id do wyczyszczenia archiwum:",
-                    sorted({r["event_id"] for r in wszystkie_pliki if r["Typ"] == "ARCHIWUM"}),
-                    key="event_id_clear_archive",
-                )
+                eventy_archiwum = sorted({
+                    r["event_id"]
+                    for r in wszystkie_pliki
+                    if r["Typ"] == "ARCHIWUM"
+                })
 
-                if event_id_do_czyszczenia:
+                if eventy_archiwum:
+                    event_id_do_czyszczenia = st.selectbox(
+                        "Wybierz event_id do wyczyszczenia archiwum:",
+                        eventy_archiwum,
+                        key="event_id_clear_archive",
+                    )
+
                     arch_dir = ARCHIWUM_DIR / event_id_do_czyszczenia
                     liczba_archiwum = len(list(arch_dir.glob("*.xlsx"))) if arch_dir.exists() else 0
 
@@ -650,6 +661,8 @@ def pokaz_panel_administratora() -> None:
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"Nie udało się wyczyścić archiwum: {e}")
+                else:
+                    st.info("Brak plików archiwalnych do wyczyszczenia.")
         else:
             st.info("Brak plików aktywnych i archiwalnych.")
 
