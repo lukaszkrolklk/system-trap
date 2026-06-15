@@ -1669,18 +1669,6 @@ if path is None:
 df_baza = wczytaj_excel(path)
 
 
-def pokaz_info_o_pliku_na_dole(path: Path) -> None:
-    st.markdown(
-        f"""
-<div class="file-info-footer">
-    <div>Google służy tylko do pobrania listy. Cała praca odbywa się na aktywnym pliku Excel zawodów.</div>
-    <div style="margin-top: 6px;">Zawody: <code>{st.session_state.get("event_name") or aktywny_event_id()}</code></div>
-    <div style="margin-top: 6px;">Aktywny plik: <code>{path.name}</code></div>
-</div>
-""",
-        unsafe_allow_html=True,
-    )
-
 
 def html_strzaly_dla_podgladu(row: pd.Series) -> str:
     html = ""
