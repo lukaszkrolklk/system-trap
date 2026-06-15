@@ -1430,7 +1430,7 @@ if TRYB_ZAWODNIKA:
 <style>
     [data-testid="stSidebar"] {display: none;}
     [data-testid="collapsedControl"] {display: none;}
-    .block-container {padding-top: 0.7rem;}
+    .block-container {padding-top: 2.5rem;}
 </style>
 """,
         unsafe_allow_html=True,
