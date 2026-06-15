@@ -2027,7 +2027,7 @@ if st.session_state.tryb_pracy == "MENU":
         reczny = st.text_input(
             "Dopisz ręcznie:",
             placeholder="Nazwisko i imię",
-            key="reczny_zawodnik",
+            key=f"reczny_zawodnik_{reset_id}",
         ).strip().upper()
 
     if st.button("➕ Dodaj zawodnika", type="primary"):
@@ -2064,12 +2064,7 @@ if st.session_state.tryb_pracy == "MENU":
                             "konkurencja": konkurencja,
                         })
 
-                        st.session_state.reczny_zawodnik = ""
-
-                        st.session_state.reset_wyszukiwarki = int(
-                            st.session_state.get("reset_wyszukiwarki", 0)
-                        ) + 1
-
+                        st.session_state.reset_wyszukiwarki = int(st.session_state.get("reset_wyszukiwarki", 0)) + 1
                         st.rerun()
 
     if st.session_state.wybrani_zawodnicy:
