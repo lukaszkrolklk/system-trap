@@ -337,7 +337,28 @@ def slugify_event_id(value: str) -> str:
     return txt or "default"
 
 
-def wczytaj_events() -> dict:
+def str_to_bool(value) -> bool:
+    txt = str(value).strip().upper()
+    return txt in ["TRUE", "TAK", "YES", "1", "Y"]
+
+
+def safe_cell(row, col: str, default: str = "") -> str:
+    if col not in row:
+        return default
+
+    value = row.get(col, default)
+
+    if pd.isna(value):
+        return default
+
+    return str(value).strip()
+
+
+def wczytaj_lokalny_events_json() -> dict:
+    """
+    Lokalny events.json nie jest już bazą zawodów.
+    Służy tylko jako wskaźnik do arkusza TRAP_CONFIG oraz opcjonalnie do hasła administratora.
+    """
     if not EVENTS_FILE.exists():
         return {}
 
@@ -348,6 +369,105 @@ def wczytaj_events() -> dict:
     except Exception:
         return {}
 
+
+def wczytaj_events_z_trap_config(config_sheet_link: str) -> dict:
+    """
+    Czyta konfigurację zawodów z publicznego arkusza Google Sheets przez CSV.
+    Nie używa Google API.
+
+    Wymagany arkusz / gid powinien mieć kolumny:
+    kod, enabled, event_id, nazwa, google_sheet, aktywny_od, aktywny_do,
+    pk_wymaga_standard, trap10, trap20, pk, standard
+    """
+    csv_url = google_link_do_csv_url(config_sheet_link)
+    df = pd.read_csv(csv_url, dtype=str).fillna("")
+    df.columns = [str(c).strip().lower() for c in df.columns]
+
+    wymagane = [
+        "kod",
+        "enabled",
+        "event_id",
+        "nazwa",
+        "google_sheet",
+        "aktywny_od",
+        "aktywny_do",
+        "pk_wymaga_standard",
+        "trap10",
+        "trap20",
+        "pk",
+        "standard",
+    ]
+
+    brakujace = [c for c in wymagane if c not in df.columns]
+    if brakujace:
+        raise ValueError(f"Brakuje kolumn w TRAP_CONFIG: {', '.join(brakujace)}")
+
+    events = {}
+
+    for _, row in df.iterrows():
+        kod = safe_cell(row, "kod").lower()
+
+        if not kod or kod.startswith("_"):
+            continue
+
+        def limit_int(col: str, default: int) -> int:
+            raw = safe_cell(row, col, str(default))
+            try:
+                val = int(float(str(raw).replace(",", ".")))
+            except Exception:
+                val = default
+            return max(1, min(val, MAX_RZUTKOW))
+
+        event_id_raw = safe_cell(row, "event_id", kod)
+
+        events[kod] = {
+            "enabled": str_to_bool(safe_cell(row, "enabled")),
+            "event_id": slugify_event_id(event_id_raw or kod),
+            "nazwa": safe_cell(row, "nazwa", kod),
+            "google_sheet": safe_cell(row, "google_sheet"),
+            "aktywny_od": safe_cell(row, "aktywny_od"),
+            "aktywny_do": safe_cell(row, "aktywny_do"),
+            "pk_wymaga_standard": str_to_bool(safe_cell(row, "pk_wymaga_standard")),
+            "konkurencje": {
+                "TRAP10": limit_int("trap10", 10),
+                "TRAP20": limit_int("trap20", 20),
+                "PK": limit_int("pk", 20),
+                "STANDARD": limit_int("standard", 20),
+            },
+        }
+
+    return events
+
+
+def wczytaj_events() -> dict:
+    """
+    Główna funkcja konfiguracji.
+    Priorytet:
+    1. events.json zawiera config_sheet -> pobieramy zawody z TRAP_CONFIG.
+    2. Jeżeli TRAP_CONFIG nie działa, używamy lokalnego events.json jako awaryjnego fallbacku.
+    """
+    lokalny = wczytaj_lokalny_events_json()
+    config_sheet = str(lokalny.get("config_sheet", "")).strip()
+
+    if config_sheet:
+        try:
+            events = wczytaj_events_z_trap_config(config_sheet)
+
+            # Hasło administratora zostaje lokalnie w events.json, żeby nie używać Google API do edycji.
+            events["_admin"] = lokalny.get("_admin", {"password": "TRAPADMIN"})
+            events["_config"] = {
+                "source": "TRAP_CONFIG",
+                "config_sheet": config_sheet,
+            }
+            return events
+
+        except Exception as e:
+            # Komunikat pokazujemy dopiero tam, gdzie jest dostępny Streamlit.
+            st.sidebar.error(f"Nie udało się pobrać TRAP_CONFIG: {e}")
+            lokalny["_config_error"] = str(e)
+            return lokalny
+
+    return lokalny
 
 
 
@@ -380,29 +500,26 @@ def policz_pliki_eventu(event_id: str) -> tuple[int, int]:
 
 def pokaz_panel_administratora() -> None:
     st.markdown('<div class="main-title">⚙️ TRAP20 — Panel administratora</div>', unsafe_allow_html=True)
-    st.caption("Zarządzanie kodami zawodów, konfiguracją events.json oraz archiwum.")
+    st.caption("Podgląd konfiguracji zawodów z TRAP_CONFIG oraz plików aktywnych/archiwum. Edycję wykonujemy w Google Sheets.")
 
     events = wczytaj_events()
+    config_info = events.get("_config", {}) if isinstance(events.get("_config", {}), dict) else {}
 
-    if "_admin" not in events:
-        events["_admin"] = {"password": "TRAPADMIN2026"}
-        zapisz_events(events)
-
-    tab1, tab2, tab3, tab4 = st.tabs([
+    tab1, tab2, tab3 = st.tabs([
         "📋 Zawody",
-        "➕ Dodaj / edytuj kod",
         "📦 Pliki i archiwum",
-        "🧾 events.json",
+        "🧾 Konfiguracja",
     ])
 
     with tab1:
-        st.subheader("Aktywne kody zawodów")
+        st.subheader("Kody zawodów z TRAP_CONFIG")
 
         rows = []
         for kod, cfg in eventy_uzytkowe(events).items():
             event_id = slugify_event_id(cfg.get("event_id", kod))
             aktywne_pliki, archiwum_pliki = policz_pliki_eventu(event_id)
             aktywny, komunikat = event_aktywny(cfg)
+            limity = cfg.get("konkurencje", {}) if isinstance(cfg.get("konkurencje", {}), dict) else {}
 
             rows.append({
                 "Kod": kod,
@@ -414,169 +531,29 @@ def pokaz_panel_administratora() -> None:
                 "Aktywny od": cfg.get("aktywny_od", ""),
                 "Aktywny do": cfg.get("aktywny_do", ""),
                 "PK wymaga Standard": bool(cfg.get("pk_wymaga_standard", False)),
+                "TRAP10": limity.get("TRAP10", ""),
+                "TRAP20": limity.get("TRAP20", ""),
+                "PK": limity.get("PK", ""),
+                "STANDARD": limity.get("STANDARD", ""),
                 "Pliki aktywne": aktywne_pliki,
                 "Pliki archiwum": archiwum_pliki,
+                "Google Sheet": cfg.get("google_sheet", ""),
             })
 
         if rows:
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
         else:
-            st.info("Brak skonfigurowanych zawodów w events.json.")
+            st.info("Brak skonfigurowanych zawodów w TRAP_CONFIG.")
 
-        st.markdown("#### Szybkie akcje")
+        if st.button("🔄 Odśwież podgląd", use_container_width=True):
+            st.rerun()
 
-        event_keys = list(eventy_uzytkowe(events).keys())
-
-        if event_keys:
-            wybrany_kod = st.selectbox("Wybierz kod:", event_keys, key="admin_quick_event")
-            cfg = events[wybrany_kod]
-
-            c1, c2, c3 = st.columns(3)
-
-            with c1:
-                if st.button("Włącz / wyłącz kod", use_container_width=True):
-                    events[wybrany_kod]["enabled"] = not bool(cfg.get("enabled", False))
-                    zapisz_events(events)
-                    st.success("Zmieniono status kodu.")
-                    st.rerun()
-
-            with c2:
-                if st.button("Ustaw jako aktywne zawody", use_container_width=True):
-                    ustaw_event(
-                        cfg.get("event_id", wybrany_kod),
-                        cfg.get("nazwa", wybrany_kod),
-                        cfg,
-                    )
-                    st.session_state.zawody_zakonczone = False
-                    st.session_state.admin_mode = False
-                    st.success("Ustawiono zawody jako aktywne.")
-                    st.rerun()
-
-            with c3:
-                if st.button("Odśwież panel", use_container_width=True):
-                    st.rerun()
+        st.info(
+            "Panel administratora jest teraz tylko do podglądu. "
+            "Zmiany kodów, dat, linków i limitów rzutków wykonuj w arkuszu Google Sheets TRAP_CONFIG."
+        )
 
     with tab2:
-        st.subheader("Dodaj albo edytuj kod zawodów")
-
-        event_keys = ["<NOWY KOD>"] + list(eventy_uzytkowe(events).keys())
-        wybor = st.selectbox("Tryb:", event_keys, key="admin_edit_select")
-
-        if wybor == "<NOWY KOD>":
-            cfg0 = {
-                "enabled": True,
-                "event_id": "",
-                "nazwa": "",
-                "google_sheet": "",
-                "aktywny_od": "",
-                "aktywny_do": "",
-                "pk_wymaga_standard": False,
-                "konkurencje": {
-                    "TRAP10": 10,
-                    "TRAP20": 20,
-                    "PK": 20,
-                    "STANDARD": 20
-                },
-            }
-            kod0 = ""
-        else:
-            cfg0 = events.get(wybor, {})
-            kod0 = wybor
-
-        with st.form("admin_event_form"):
-            kod = st.text_input("Kod zawodów:", value=kod0, placeholder="np. snajper2026").strip().lower()
-            nazwa = st.text_input("Nazwa zawodów:", value=str(cfg0.get("nazwa", "")))
-            event_id = st.text_input(
-                "event_id / katalog zawodów:",
-                value=str(cfg0.get("event_id", "")),
-                placeholder="np. snajper_lublin_20260620",
-            )
-            google_sheet = st.text_input("Link Google Sheets:", value=str(cfg0.get("google_sheet", "")))
-            aktywny_od = st.text_input("Aktywny od:", value=str(cfg0.get("aktywny_od", "")), placeholder="2026-06-20 07:00")
-            aktywny_do = st.text_input("Aktywny do:", value=str(cfg0.get("aktywny_do", "")), placeholder="2026-06-20 20:00")
-            enabled = st.checkbox("Kod włączony", value=bool(cfg0.get("enabled", True)))
-            pk_wymaga_standard = st.checkbox(
-                "PK wymaga wcześniejszego startu Standard",
-                value=bool(cfg0.get("pk_wymaga_standard", False)),
-            )
-
-            limity_konkurencji_txt = st.text_area(
-                "Limity rzutków dla konkurencji / JSON:",
-                value=json.dumps(
-                    cfg0.get(
-                        "konkurencje",
-                        {
-                            "TRAP10": 10,
-                            "TRAP20": 20,
-                            "PK": 20,
-                            "STANDARD": 20
-                        },
-                    ),
-                    ensure_ascii=False,
-                    indent=2,
-                ),
-                height=150,
-                help='Przykład: {"TRAP10": 10, "TRAP20": 20, "PK": 20}. Limit blokuje ręczną zmianę liczby rzutków przez sędziego.',
-            )
-
-            submitted = st.form_submit_button("💾 Zapisz kod zawodów", type="primary")
-
-        if submitted:
-            if not kod:
-                st.error("Kod zawodów nie może być pusty.")
-            else:
-                try:
-                    limity_konkurencji = json.loads(limity_konkurencji_txt.strip() or "{}")
-
-                    if not isinstance(limity_konkurencji, dict):
-                        raise ValueError("Limity konkurencji muszą być obiektem JSON.")
-
-                    limity_konkurencji = {
-                        normalizuj_konkurencje(k): int(v)
-                        for k, v in limity_konkurencji.items()
-                        if str(k).strip()
-                    }
-
-                    for k, v in limity_konkurencji.items():
-                        if not (1 <= int(v) <= MAX_RZUTKOW):
-                            raise ValueError(f"Limit dla {k} musi być od 1 do {MAX_RZUTKOW}.")
-
-                    if not event_id:
-                        event_id = kod
-
-                    events[kod] = {
-                        "enabled": bool(enabled),
-                        "event_id": slugify_event_id(event_id),
-                        "nazwa": nazwa.strip() or kod,
-                        "google_sheet": google_sheet.strip(),
-                        "aktywny_od": aktywny_od.strip(),
-                        "aktywny_do": aktywny_do.strip(),
-                        "pk_wymaga_standard": bool(pk_wymaga_standard),
-                        "konkurencje": limity_konkurencji,
-                    }
-
-                    zapisz_events(events)
-                    st.success(f"Zapisano kod: {kod}")
-                    st.rerun()
-
-                except Exception as e:
-                    st.error(f"Nie zapisano kodu. Błąd w limitach konkurencji: {e}")
-
-        st.markdown("#### Zmiana hasła administratora")
-
-        with st.form("admin_password_form"):
-            nowe_haslo = st.text_input("Nowe hasło administratora:", type="password")
-            zapisz_haslo = st.form_submit_button("Zmień hasło administratora")
-
-        if zapisz_haslo:
-            if len(nowe_haslo.strip()) < 6:
-                st.error("Hasło powinno mieć minimum 6 znaków.")
-            else:
-                events["_admin"] = {"password": nowe_haslo.strip()}
-                zapisz_events(events)
-                st.success("Hasło administratora zostało zmienione.")
-
-    with tab3:
         st.subheader("Pliki aktywne i archiwum")
 
         wszystkie_pliki = []
@@ -619,30 +596,31 @@ def pokaz_panel_administratora() -> None:
         else:
             st.info("Brak plików aktywnych i archiwalnych.")
 
-    with tab4:
-        st.subheader("Edycja surowego events.json")
+    with tab3:
+        st.subheader("Źródło konfiguracji")
 
-        raw = json.dumps(events, ensure_ascii=False, indent=2)
+        local_cfg = wczytaj_lokalny_events_json()
+        config_sheet = config_info.get("config_sheet") or local_cfg.get("config_sheet", "")
 
-        edited = st.text_area(
-            "Zawartość pliku events.json:",
-            value=raw,
-            height=420,
-            key="admin_events_raw",
-        )
+        st.markdown("#### events.json")
+        st.code(json.dumps(local_cfg, ensure_ascii=False, indent=2), language="json")
 
-        if st.button("💾 Zapisz surowy JSON", type="primary"):
-            try:
-                parsed = json.loads(edited)
-                if not isinstance(parsed, dict):
-                    st.error("Główny obiekt JSON musi być słownikiem.")
-                else:
-                    zapisz_events(parsed)
-                    st.success("Zapisano events.json.")
-                    st.rerun()
-            except Exception as e:
-                st.error(f"Nieprawidłowy JSON: {e}")
+        st.markdown("#### TRAP_CONFIG")
+        if config_sheet:
+            st.write(config_sheet)
+            st.caption("Aplikacja czyta dane z tego arkusza przez publiczny eksport CSV. Nie używa Google API.")
+        else:
+            st.warning("W events.json brakuje pola config_sheet.")
 
+        if "_config_error" in events:
+            st.error(f"Ostatni błąd pobierania TRAP_CONFIG: {events['_config_error']}")
+
+        st.markdown("#### Podgląd danych używanych przez aplikację")
+        podglad = {
+            k: v for k, v in events.items()
+            if isinstance(v, dict) and not str(k).startswith("_")
+        }
+        st.code(json.dumps(podglad, ensure_ascii=False, indent=2), language="json")
 
 def event_aktywny(event_cfg: dict) -> tuple[bool, str]:
     if not event_cfg.get("enabled", False):
@@ -659,7 +637,7 @@ def event_aktywny(event_cfg: dict) -> tuple[bool, str]:
         od = datetime.strptime(aktywny_od, "%Y-%m-%d %H:%M")
         do = datetime.strptime(aktywny_do, "%Y-%m-%d %H:%M")
     except Exception:
-        return False, "Błędny format daty w events.json. Użyj: RRRR-MM-DD HH:MM."
+        return False, "Błędny format daty w TRAP_CONFIG. Użyj: RRRR-MM-DD HH:MM."
 
     if teraz < od:
         return False, f"Kod będzie aktywny od {aktywny_od}."
@@ -1489,7 +1467,7 @@ if not TRYB_ZAWODNIKA:
 
             if kod_listy:
                 if kod_listy not in EVENTS:
-                    st.sidebar.error("Nieznany kod zawodów. Sprawdź events.json.")
+                    st.sidebar.error("Nieznany kod zawodów. Sprawdź arkusz TRAP_CONFIG.")
                     st.stop()
 
                 event_cfg = EVENTS[kod_listy]
@@ -1500,7 +1478,7 @@ if not TRYB_ZAWODNIKA:
 
                 link_do_pobrania = str(event_cfg.get("google_sheet", "")).strip()
                 if not link_do_pobrania:
-                    st.sidebar.error("W events.json brakuje pola google_sheet dla tego kodu.")
+                    st.sidebar.error("W TRAP_CONFIG brakuje pola google_sheet dla tego kodu.")
                     st.stop()
 
                 event_id = event_cfg.get("event_id", kod_listy)
@@ -1516,7 +1494,7 @@ if not TRYB_ZAWODNIKA:
                 link_do_pobrania = wlasny_link
 
             else:
-                st.sidebar.error("Wpisz kod zawodów z events.json albo zaznacz własny link.")
+                st.sidebar.error("Wpisz kod zawodów z TRAP_CONFIG albo zaznacz własny link.")
                 st.stop()
 
             df_google = pobierz_liste_z_google(link_do_pobrania)
@@ -1809,7 +1787,7 @@ if st.session_state.tryb_pracy == "MENU":
             opcje_limitow,
             index=limit_index,
             disabled=True,
-            help="Limit wynika z konfiguracji konkurencji w events.json / panelu administratora.",
+            help="Limit wynika z konfiguracji konkurencji w TRAP_CONFIG.",
         )
         st.caption("Limit jest przypisany do konkurencji.")
 
