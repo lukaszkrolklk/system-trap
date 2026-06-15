@@ -1587,7 +1587,7 @@ if TRYB_ZAWODNIKA:
 # ============================================================
 
 if not TRYB_ZAWODNIKA:
-    st.sidebar.header("📁 Plik zawodów")
+    st.sidebar.header("🏆 TRAP)
 
     EVENTS = wczytaj_events()
 
