@@ -1,4 +1,6 @@
+import json
 import re
+import shutil
 from datetime import datetime
 from pathlib import Path
 
@@ -18,27 +20,34 @@ st.set_page_config(
 
 APP_DIR = Path(__file__).parent
 DATA_DIR = APP_DIR / "data"
+ARCHIWUM_DIR = APP_DIR / "archiwum"
+EVENTS_FILE = APP_DIR / "events.json"
 DATA_DIR.mkdir(exist_ok=True)
+ARCHIWUM_DIR.mkdir(exist_ok=True)
 
 MAX_RZUTKOW = 25
+
+KOLUMNA_KONKURENCJA = "Konkurencja"
+KOLUMNA_KOLEJNOSC = "Kolejność w zmianie"
+KOLUMNA_LIMIT = "Limit rzutków"
+
 WYMAGANE_KOLUMNY = [
     "Nazwisko",
     "Zmiana",
-    "Typ",
+    KOLUMNA_KONKURENCJA,
     "Status",
     "Suma trafień",
     "Ile za pierwszym",
 ]
 
 KOLUMNY_STRZALOW = [f"Strzał_{i}" for i in range(1, MAX_RZUTKOW + 1)]
+
 ARKUSZ_WYNIKI = "Wyniki Szczegółowe"
+ARKUSZ_REZULTATY_PREFIX = "Ranking"
 ARKUSZ_REZULTATY = "Rezultaty"
 ARKUSZ_REZULTATY_PK = "Rezultaty PK"
 
-# Kolumny techniczne używane do bezpiecznego wznowienia przerwanej zmiany.
-# Zostają w Excelu, ale nie przeszkadzają rankingom ani panelowi zawodnika.
-KOLUMNA_KOLEJNOSC = "Kolejność w zmianie"
-KOLUMNA_LIMIT = "Limit rzutków"
+KONKURENCJE_DOMYSLNE = ["TRAP20", "TRAP10", "PK", "STANDARD"]
 
 
 # ============================================================
@@ -48,10 +57,6 @@ KOLUMNA_LIMIT = "Limit rzutków"
 st.markdown(
     """
 <style>
-    /* ============================================================
-       TRAP20 — styl responsywny pod telefon / tablet
-       ============================================================ */
-
     .main-title {
         font-size: 30px;
         font-weight: 900;
@@ -107,11 +112,9 @@ st.markdown(
         outline-offset: 1px;
     }
 
-    /* Kompaktowy wiersz zawodnika (Komputer) */
     .player-row {
         display: grid;
-        /* Zwężono pierwszą kolumnę z 76px na 45px */
-        grid-template-columns: 45px 160px minmax(300px, 1fr) 84px;
+        grid-template-columns: 45px 180px minmax(300px, 1fr) 84px;
         align-items: center;
         column-gap: 8px;
         padding: 4px 0;
@@ -128,8 +131,7 @@ st.markdown(
         font-weight: 900;
         font-size: 14px;
         line-height: 1.2;
-        /* Pozwolenie na zawijanie długich nazwisk */
-        white-space: normal; 
+        white-space: normal;
         word-wrap: break-word;
     }
 
@@ -197,7 +199,6 @@ st.markdown(
         border-top: 1px solid rgba(239, 68, 68, 0.35);
     }
 
-    /* Telefon poziomo / mały tablet */
     @media (max-width: 950px) {
         .main-title {
             font-size: 22px;
@@ -228,8 +229,7 @@ st.markdown(
         }
 
         .player-row {
-            /* Zwężono pierwszą kolumnę z 56px na 38px */
-            grid-template-columns: 38px 124px minmax(235px, 1fr) 62px;
+            grid-template-columns: 38px 135px minmax(235px, 1fr) 62px;
             column-gap: 5px;
             padding: 3px 0;
         }
@@ -283,10 +283,8 @@ st.markdown(
         }
     }
 
-    /* Telefon pionowo (NAJWAŻNIEJSZE ZMIANY) */
     @media (max-width: 620px) {
         .player-row {
-            /* Pierwsza kolumna na stanowisko (S 1) zwężona z 50px do 32px */
             grid-template-columns: 32px 1fr 58px;
             row-gap: 2px;
         }
@@ -297,7 +295,7 @@ st.markdown(
 
         .player-name {
             font-size: 13px;
-            white-space: normal; /* Pozwala na ALICJA [następna linia] PIENIĘŻNIK */
+            white-space: normal;
             line-height: 1.2;
         }
 
@@ -317,8 +315,7 @@ st.markdown(
         .player-sum {
             font-size: 12px;
         }
-        
-        /* Poprawka dla mobilnego wyszukiwania - zapobiega ucinaniu kliknięć w selectboxy */
+
         div[data-baseweb="select"] {
             z-index: 999;
         }
@@ -333,13 +330,336 @@ st.markdown(
 # FUNKCJE PLIKÓW I DANYCH
 # ============================================================
 
+def slugify_event_id(value: str) -> str:
+    txt = str(value).strip().lower()
+    txt = re.sub(r"[^a-z0-9_-]+", "_", txt)
+    txt = re.sub(r"_+", "_", txt).strip("_")
+    return txt or "default"
+
+
+def wczytaj_events() -> dict:
+    if not EVENTS_FILE.exists():
+        return {}
+
+    try:
+        with open(EVENTS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+
+
+def zapisz_events(data: dict) -> None:
+    with open(EVENTS_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def haslo_admina(events: dict) -> str:
+    return str(events.get("_admin", {}).get("password", "TRAPADMIN2026"))
+
+
+def eventy_uzytkowe(events: dict) -> dict:
+    return {
+        k: v for k, v in events.items()
+        if not str(k).startswith("_") and isinstance(v, dict)
+    }
+
+
+def policz_pliki_eventu(event_id: str) -> tuple[int, int]:
+    event_id = slugify_event_id(event_id)
+    active_dir = DATA_DIR / event_id
+    archive_dir = ARCHIWUM_DIR / event_id
+
+    active = len(list(active_dir.glob("*.xlsx"))) if active_dir.exists() else 0
+    archive = len(list(archive_dir.glob("*.xlsx"))) if archive_dir.exists() else 0
+
+    return active, archive
+
+
+def pokaz_panel_administratora() -> None:
+    st.markdown('<div class="main-title">⚙️ TRAP20 — Panel administratora</div>', unsafe_allow_html=True)
+    st.caption("Zarządzanie kodami zawodów, konfiguracją events.json oraz archiwum.")
+
+    events = wczytaj_events()
+
+    if "_admin" not in events:
+        events["_admin"] = {"password": "TRAPADMIN2026"}
+        zapisz_events(events)
+
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "📋 Zawody",
+        "➕ Dodaj / edytuj kod",
+        "📦 Pliki i archiwum",
+        "🧾 events.json",
+    ])
+
+    with tab1:
+        st.subheader("Aktywne kody zawodów")
+
+        rows = []
+        for kod, cfg in eventy_uzytkowe(events).items():
+            event_id = slugify_event_id(cfg.get("event_id", kod))
+            aktywne_pliki, archiwum_pliki = policz_pliki_eventu(event_id)
+            aktywny, komunikat = event_aktywny(cfg)
+
+            rows.append({
+                "Kod": kod,
+                "Włączony": bool(cfg.get("enabled", False)),
+                "Aktywny teraz": aktywny,
+                "Komunikat": komunikat,
+                "Nazwa": cfg.get("nazwa", ""),
+                "event_id": event_id,
+                "Aktywny od": cfg.get("aktywny_od", ""),
+                "Aktywny do": cfg.get("aktywny_do", ""),
+                "PK wymaga Standard": bool(cfg.get("pk_wymaga_standard", False)),
+                "Pliki aktywne": aktywne_pliki,
+                "Pliki archiwum": archiwum_pliki,
+            })
+
+        if rows:
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        else:
+            st.info("Brak skonfigurowanych zawodów w events.json.")
+
+        st.markdown("#### Szybkie akcje")
+
+        event_keys = list(eventy_uzytkowe(events).keys())
+
+        if event_keys:
+            wybrany_kod = st.selectbox("Wybierz kod:", event_keys, key="admin_quick_event")
+            cfg = events[wybrany_kod]
+
+            c1, c2, c3 = st.columns(3)
+
+            with c1:
+                if st.button("Włącz / wyłącz kod", use_container_width=True):
+                    events[wybrany_kod]["enabled"] = not bool(cfg.get("enabled", False))
+                    zapisz_events(events)
+                    st.success("Zmieniono status kodu.")
+                    st.rerun()
+
+            with c2:
+                if st.button("Ustaw jako aktywne zawody", use_container_width=True):
+                    ustaw_event(
+                        cfg.get("event_id", wybrany_kod),
+                        cfg.get("nazwa", wybrany_kod),
+                        cfg,
+                    )
+                    st.session_state.zawody_zakonczone = False
+                    st.session_state.admin_mode = False
+                    st.success("Ustawiono zawody jako aktywne.")
+                    st.rerun()
+
+            with c3:
+                if st.button("Odśwież panel", use_container_width=True):
+                    st.rerun()
+
+    with tab2:
+        st.subheader("Dodaj albo edytuj kod zawodów")
+
+        event_keys = ["<NOWY KOD>"] + list(eventy_uzytkowe(events).keys())
+        wybor = st.selectbox("Tryb:", event_keys, key="admin_edit_select")
+
+        if wybor == "<NOWY KOD>":
+            cfg0 = {
+                "enabled": True,
+                "event_id": "",
+                "nazwa": "",
+                "google_sheet": "",
+                "aktywny_od": "",
+                "aktywny_do": "",
+                "pk_wymaga_standard": False,
+            }
+            kod0 = ""
+        else:
+            cfg0 = events.get(wybor, {})
+            kod0 = wybor
+
+        with st.form("admin_event_form"):
+            kod = st.text_input("Kod zawodów:", value=kod0, placeholder="np. snajper2026").strip().lower()
+            nazwa = st.text_input("Nazwa zawodów:", value=str(cfg0.get("nazwa", "")))
+            event_id = st.text_input(
+                "event_id / katalog zawodów:",
+                value=str(cfg0.get("event_id", "")),
+                placeholder="np. snajper_lublin_20260620",
+            )
+            google_sheet = st.text_input("Link Google Sheets:", value=str(cfg0.get("google_sheet", "")))
+            aktywny_od = st.text_input("Aktywny od:", value=str(cfg0.get("aktywny_od", "")), placeholder="2026-06-20 07:00")
+            aktywny_do = st.text_input("Aktywny do:", value=str(cfg0.get("aktywny_do", "")), placeholder="2026-06-20 20:00")
+            enabled = st.checkbox("Kod włączony", value=bool(cfg0.get("enabled", True)))
+            pk_wymaga_standard = st.checkbox(
+                "PK wymaga wcześniejszego startu Standard",
+                value=bool(cfg0.get("pk_wymaga_standard", False)),
+            )
+
+            submitted = st.form_submit_button("💾 Zapisz kod zawodów", type="primary")
+
+        if submitted:
+            if not kod:
+                st.error("Kod zawodów nie może być pusty.")
+            else:
+                if not event_id:
+                    event_id = kod
+
+                events[kod] = {
+                    "enabled": bool(enabled),
+                    "event_id": slugify_event_id(event_id),
+                    "nazwa": nazwa.strip() or kod,
+                    "google_sheet": google_sheet.strip(),
+                    "aktywny_od": aktywny_od.strip(),
+                    "aktywny_do": aktywny_do.strip(),
+                    "pk_wymaga_standard": bool(pk_wymaga_standard),
+                }
+
+                zapisz_events(events)
+                st.success(f"Zapisano kod: {kod}")
+                st.rerun()
+
+        st.markdown("#### Zmiana hasła administratora")
+
+        with st.form("admin_password_form"):
+            nowe_haslo = st.text_input("Nowe hasło administratora:", type="password")
+            zapisz_haslo = st.form_submit_button("Zmień hasło administratora")
+
+        if zapisz_haslo:
+            if len(nowe_haslo.strip()) < 6:
+                st.error("Hasło powinno mieć minimum 6 znaków.")
+            else:
+                events["_admin"] = {"password": nowe_haslo.strip()}
+                zapisz_events(events)
+                st.success("Hasło administratora zostało zmienione.")
+
+    with tab3:
+        st.subheader("Pliki aktywne i archiwum")
+
+        wszystkie_pliki = []
+
+        for base_name, base_dir in [("AKTYWNE", DATA_DIR), ("ARCHIWUM", ARCHIWUM_DIR)]:
+            if not base_dir.exists():
+                continue
+
+            for file in sorted(base_dir.glob("*/*.xlsx"), reverse=True):
+                wszystkie_pliki.append({
+                    "Typ": base_name,
+                    "event_id": file.parent.name,
+                    "Plik": file.name,
+                    "Ścieżka": str(file),
+                    "Rozmiar KB": round(file.stat().st_size / 1024, 1),
+                    "Modyfikacja": datetime.fromtimestamp(file.stat().st_mtime).strftime("%Y-%m-%d %H:%M"),
+                })
+
+        if wszystkie_pliki:
+            st.dataframe(pd.DataFrame(wszystkie_pliki), use_container_width=True, hide_index=True)
+
+            st.markdown("#### Pobieranie plików")
+
+            opis_do_sciezki = {
+                f"{r['Typ']} | {r['event_id']} | {r['Plik']}": r["Ścieżka"]
+                for r in wszystkie_pliki
+            }
+
+            wybor_pliku = st.selectbox("Wybierz plik do pobrania:", list(opis_do_sciezki.keys()))
+
+            file_path = Path(opis_do_sciezki[wybor_pliku])
+            if file_path.exists():
+                st.download_button(
+                    "⬇️ Pobierz wybrany Excel",
+                    data=file_path.read_bytes(),
+                    file_name=file_path.name,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                )
+        else:
+            st.info("Brak plików aktywnych i archiwalnych.")
+
+    with tab4:
+        st.subheader("Edycja surowego events.json")
+
+        raw = json.dumps(events, ensure_ascii=False, indent=2)
+
+        edited = st.text_area(
+            "Zawartość pliku events.json:",
+            value=raw,
+            height=420,
+            key="admin_events_raw",
+        )
+
+        if st.button("💾 Zapisz surowy JSON", type="primary"):
+            try:
+                parsed = json.loads(edited)
+                if not isinstance(parsed, dict):
+                    st.error("Główny obiekt JSON musi być słownikiem.")
+                else:
+                    zapisz_events(parsed)
+                    st.success("Zapisano events.json.")
+                    st.rerun()
+            except Exception as e:
+                st.error(f"Nieprawidłowy JSON: {e}")
+
+
+def event_aktywny(event_cfg: dict) -> tuple[bool, str]:
+    if not event_cfg.get("enabled", False):
+        return False, "Kod zawodów jest wyłączony."
+
+    aktywny_od = str(event_cfg.get("aktywny_od", "")).strip()
+    aktywny_do = str(event_cfg.get("aktywny_do", "")).strip()
+
+    if not aktywny_od or not aktywny_do:
+        return True, ""
+
+    try:
+        teraz = datetime.now()
+        od = datetime.strptime(aktywny_od, "%Y-%m-%d %H:%M")
+        do = datetime.strptime(aktywny_do, "%Y-%m-%d %H:%M")
+    except Exception:
+        return False, "Błędny format daty w events.json. Użyj: RRRR-MM-DD HH:MM."
+
+    if teraz < od:
+        return False, f"Kod będzie aktywny od {aktywny_od}."
+
+    if teraz > do:
+        return False, f"Kod wygasł {aktywny_do}."
+
+    return True, ""
+
+
+def ustaw_event(event_id: str, nazwa: str = "", cfg: dict | None = None) -> None:
+    event_id = slugify_event_id(event_id)
+    st.session_state.event_id = event_id
+    st.session_state.event_name = nazwa or event_id
+    st.session_state.event_cfg = cfg or {}
+
+
+def aktywny_event_id() -> str:
+    return slugify_event_id(st.session_state.get("event_id", "default"))
+
+
+def aktywny_event_dir() -> Path:
+    path = DATA_DIR / aktywny_event_id()
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def aktywny_archiwum_dir() -> Path:
+    path = ARCHIWUM_DIR / aktywny_event_id()
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def lista_plikow_zawodow() -> list[Path]:
-    return sorted(DATA_DIR.glob("trap20_zawody_*.xlsx"), reverse=True)
+    return sorted(aktywny_event_dir().glob("trap20_zawody_*.xlsx"), reverse=True)
 
 
 def nazwa_nowego_pliku() -> Path:
     znacznik = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return DATA_DIR / f"trap20_zawody_{znacznik}.xlsx"
+    return aktywny_event_dir() / f"trap20_zawody_{aktywny_event_id()}_{znacznik}.xlsx"
+
+
+def bezpieczna_nazwa_archiwum(path: Path) -> Path:
+    znacznik = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return aktywny_archiwum_dir() / f"{path.stem}_ARCHIWUM_{znacznik}{path.suffix}"
 
 
 def google_link_do_csv_url(link: str) -> str:
@@ -353,11 +673,29 @@ def google_link_do_csv_url(link: str) -> str:
         return link
 
     sheet_id = match_id.group(1)
-
     match_gid = re.search(r"gid=(\d+)", link)
     gid = match_gid.group(1) if match_gid else "0"
 
     return f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
+
+
+def odczytaj_limit_z_konkurencji(konkurencja: str, domyslny: int = 20) -> int:
+    txt = str(konkurencja).upper()
+    match = re.search(r"(\d+)", txt)
+    if match:
+        val = int(match.group(1))
+        if val in [10, 15, 20, 25]:
+            return val
+    return domyslny
+
+
+def normalizuj_konkurencje(wartosc: str) -> str:
+    txt = str(wartosc).strip().upper()
+    if txt in ["", "NAN", "NONE"]:
+        return "TRAP20"
+    if txt == "STANDARD":
+        return "STANDARD"
+    return txt
 
 
 def normalizuj_naglowki(df: pd.DataFrame) -> pd.DataFrame:
@@ -373,14 +711,21 @@ def normalizuj_naglowki(df: pd.DataFrame) -> pd.DataFrame:
             mapa[col] = "Nazwisko"
         elif "zmiana" in c:
             mapa[col] = "Zmiana"
+        elif c in ["konkurencja", "konkurencje", "konkurencja startu", "kategoria"]:
+            mapa[col] = KOLUMNA_KONKURENCJA
         elif c == "typ" or "typ startu" in c:
-            mapa[col] = "Typ"
+            # Zgodność ze starymi plikami: Typ staje się Konkurencją.
+            mapa[col] = KOLUMNA_KONKURENCJA
         elif "status" in c:
             mapa[col] = "Status"
         elif "suma" in c and "traf" in c:
             mapa[col] = "Suma trafień"
         elif "pierwsz" in c:
             mapa[col] = "Ile za pierwszym"
+        elif "limit" in c and ("rzut" in c or "strza" in c):
+            mapa[col] = KOLUMNA_LIMIT
+        elif "kolej" in c:
+            mapa[col] = KOLUMNA_KOLEJNOSC
 
     df = df.rename(columns=mapa)
 
@@ -392,22 +737,29 @@ def normalizuj_naglowki(df: pd.DataFrame) -> pd.DataFrame:
         if col not in df.columns:
             df[col] = ""
 
-    # Wszystko jako tekst. To usuwa problem dtype str/int w Streamlit Cloud.
+    if KOLUMNA_LIMIT not in df.columns:
+        df[KOLUMNA_LIMIT] = ""
+
+    if KOLUMNA_KOLEJNOSC not in df.columns:
+        df[KOLUMNA_KOLEJNOSC] = ""
+
     for col in df.columns:
         df[col] = df[col].fillna("").astype(str)
 
     df["Nazwisko"] = df["Nazwisko"].str.strip().str.upper()
     df["Zmiana"] = df["Zmiana"].str.strip()
-    df["Typ"] = df["Typ"].str.strip()
+    df[KOLUMNA_KONKURENCJA] = df[KOLUMNA_KONKURENCJA].apply(normalizuj_konkurencje)
     df["Status"] = df["Status"].str.strip()
     df["Suma trafień"] = df["Suma trafień"].str.strip()
     df["Ile za pierwszym"] = df["Ile za pierwszym"].str.strip()
+    df[KOLUMNA_LIMIT] = df[KOLUMNA_LIMIT].str.strip()
+    df[KOLUMNA_KOLEJNOSC] = df[KOLUMNA_KOLEJNOSC].str.strip()
 
     df = df[df["Nazwisko"] != ""].copy()
 
-    # kolejność ważnych kolumn na początku
-    pozostale = [c for c in df.columns if c not in WYMAGANE_KOLUMNY + KOLUMNY_STRZALOW]
-    return df[WYMAGANE_KOLUMNY + KOLUMNY_STRZALOW + pozostale]
+    wazne = WYMAGANE_KOLUMNY + [KOLUMNA_LIMIT, KOLUMNA_KOLEJNOSC] + KOLUMNY_STRZALOW
+    pozostale = [c for c in df.columns if c not in wazne]
+    return df[wazne + pozostale]
 
 
 def pobierz_liste_z_google(link: str) -> pd.DataFrame:
@@ -421,24 +773,31 @@ def czy_ma_wynik(wartosc) -> bool:
     return txt not in ["", "nan", "none"]
 
 
-def wykryj_typ_zawodnika(df: pd.DataFrame, nazwisko: str, idx) -> str:
-    typ = str(df.at[idx, "Typ"]).strip()
+def lista_konkurencji(df: pd.DataFrame) -> list[str]:
+    if df.empty or KOLUMNA_KONKURENCJA not in df.columns:
+        return KONKURENCJE_DOMYSLNE
 
-    if typ in ["Standard", "PK"]:
-        return typ
+    wynik = sorted(
+        {
+            normalizuj_konkurencje(x)
+            for x in df[KOLUMNA_KONKURENCJA].dropna().astype(str).tolist()
+            if str(x).strip()
+        }
+    )
 
-    indeksy = df[df["Nazwisko"] == nazwisko].index.tolist()
-    pozycja = indeksy.index(idx) if idx in indeksy else 0
+    if not wynik:
+        return KONKURENCJE_DOMYSLNE
 
-    return "Standard" if pozycja == 0 else "PK"
+    return wynik
 
 
-def zbuduj_ranking(df_input: pd.DataFrame, typ: str) -> pd.DataFrame:
+def zbuduj_ranking(df_input: pd.DataFrame, konkurencja: str) -> pd.DataFrame:
     kolumny = [
         "Miejsce",
         "Nazwisko i Imię",
-        "Typ startu",
+        "Konkurencja",
         "Grupa / Zmiana",
+        "Limit rzutków",
         "Suma Trafień (Wynik)",
         "Trafienia z 1. Strzału",
     ]
@@ -447,12 +806,14 @@ def zbuduj_ranking(df_input: pd.DataFrame, typ: str) -> pd.DataFrame:
         return pd.DataFrame(columns=kolumny)
 
     df = normalizuj_naglowki(df_input)
+    konkurencja = normalizuj_konkurencje(konkurencja)
 
     df["Suma_num"] = pd.to_numeric(df["Suma trafień"], errors="coerce")
     df["Pierwszy_num"] = pd.to_numeric(df["Ile za pierwszym"], errors="coerce").fillna(0)
+    df["Limit_num"] = pd.to_numeric(df[KOLUMNA_LIMIT], errors="coerce")
 
     df = df[
-        (df["Typ"] == typ)
+        (df[KOLUMNA_KONKURENCJA] == konkurencja)
         & (df["Zmiana"].str.strip() != "")
         & (df["Suma_num"].notna())
     ].copy()
@@ -487,28 +848,42 @@ def zbuduj_ranking(df_input: pd.DataFrame, typ: str) -> pd.DataFrame:
     return pd.DataFrame({
         "Miejsce": miejsca,
         "Nazwisko i Imię": df["Nazwisko"].values,
-        "Typ startu": df["Typ"].values,
+        "Konkurencja": df[KOLUMNA_KONKURENCJA].values,
         "Grupa / Zmiana": df["Zmiana"].values,
+        "Limit rzutków": df["Limit_num"].fillna(0).astype(int).replace(0, "").values,
         "Suma Trafień (Wynik)": df["Suma_num"].astype(int).values,
         "Trafienia z 1. Strzału": df["Pierwszy_num"].astype(int).values,
     })
 
 
+def bezpieczna_nazwa_arkusza(nazwa: str) -> str:
+    nazwa = re.sub(r"[\[\]\:\*\?\/\\]", "_", str(nazwa))
+    nazwa = nazwa.strip() or "Ranking"
+    return nazwa[:31]
+
+
 def zapisz_excel(df: pd.DataFrame, path: Path) -> None:
     df = normalizuj_naglowki(df)
-
-    ranking_standard = zbuduj_ranking(df, "Standard")
-    ranking_pk = zbuduj_ranking(df, "PK")
+    konkurencje = lista_konkurencji(df)
 
     with pd.ExcelWriter(path, engine="openpyxl") as writer:
         df.to_excel(writer, sheet_name=ARKUSZ_WYNIKI, index=False)
-        ranking_standard.to_excel(writer, sheet_name=ARKUSZ_REZULTATY, index=False)
-        ranking_pk.to_excel(writer, sheet_name=ARKUSZ_REZULTATY_PK, index=False)
+
+        # Zgodność wsteczna: jeśli istnieje STANDARD i PK, stare nazwy arkuszy też będą zapisane.
+        if "STANDARD" in konkurencje:
+            zbuduj_ranking(df, "STANDARD").to_excel(writer, sheet_name=ARKUSZ_REZULTATY, index=False)
+        if "PK" in konkurencje:
+            zbuduj_ranking(df, "PK").to_excel(writer, sheet_name=ARKUSZ_REZULTATY_PK, index=False)
+
+        for konkurencja in konkurencje:
+            ranking = zbuduj_ranking(df, konkurencja)
+            nazwa_arkusza = bezpieczna_nazwa_arkusza(f"{ARKUSZ_REZULTATY_PREFIX} {konkurencja}")
+            ranking.to_excel(writer, sheet_name=nazwa_arkusza, index=False)
 
 
 def wczytaj_excel(path: Path) -> pd.DataFrame:
     if not path.exists():
-        return pd.DataFrame(columns=WYMAGANE_KOLUMNY + KOLUMNY_STRZALOW)
+        return pd.DataFrame(columns=WYMAGANE_KOLUMNY + [KOLUMNA_LIMIT, KOLUMNA_KOLEJNOSC] + KOLUMNY_STRZALOW)
 
     try:
         df = pd.read_excel(path, sheet_name=ARKUSZ_WYNIKI, dtype=str)
@@ -519,6 +894,9 @@ def wczytaj_excel(path: Path) -> pd.DataFrame:
 
 
 def aktywny_path() -> Path | None:
+    if st.session_state.get("zawody_zakonczone", False):
+        return None
+
     val = st.session_state.get("aktywny_plik", "")
 
     if val:
@@ -551,96 +929,87 @@ def kolejny_numer_zmiany(df: pd.DataFrame) -> int:
     return maks + 1
 
 
-def statusy_zawodnika(df: pd.DataFrame, nazwisko: str) -> tuple[bool, bool]:
-    wiersze = df[df["Nazwisko"] == nazwisko]
-    standard_zrobiony = False
-    pk_zrobiony = False
+def status_startu(df: pd.DataFrame, nazwisko: str, konkurencja: str) -> bool:
+    df = normalizuj_naglowki(df)
+    konkurencja = normalizuj_konkurencje(konkurencja)
 
-    for idx in wiersze.index:
-        typ = wykryj_typ_zawodnika(df, nazwisko, idx)
-        suma = df.at[idx, "Suma trafień"]
+    wiersze = df[
+        (df["Nazwisko"] == str(nazwisko).strip().upper())
+        & (df[KOLUMNA_KONKURENCJA] == konkurencja)
+    ]
 
-        if typ == "Standard" and czy_ma_wynik(suma):
-            standard_zrobiony = True
-        if typ == "PK" and czy_ma_wynik(suma):
-            pk_zrobiony = True
-
-    return standard_zrobiony, pk_zrobiony
+    return wiersze["Suma trafień"].apply(czy_ma_wynik).any()
 
 
-
-def zbuduj_liste_dostepnych(df: pd.DataFrame) -> list[dict]:
+def zbuduj_liste_dostepnych(df: pd.DataFrame, konkurencja: str | None = None) -> list[dict]:
     wynik = []
+    df = normalizuj_naglowki(df)
 
-    for nazwisko in sorted(df["Nazwisko"].dropna().astype(str).str.strip().unique()):
+    if konkurencja:
+        konkurencja = normalizuj_konkurencje(konkurencja)
+        df = df[df[KOLUMNA_KONKURENCJA] == konkurencja].copy()
+
+    for _, row in df.sort_values(["Nazwisko", KOLUMNA_KONKURENCJA]).iterrows():
+        nazwisko = str(row["Nazwisko"]).strip()
+        konk = normalizuj_konkurencje(row[KOLUMNA_KONKURENCJA])
+        suma = row["Suma trafień"]
+
         if not nazwisko:
             continue
 
-        wiersze = df[df["Nazwisko"] == nazwisko].index.tolist()
+        if czy_ma_wynik(suma):
+            continue
 
-        for idx in wiersze:
-            typ = wykryj_typ_zawodnika(df, nazwisko, idx)
-            suma = df.at[idx, "Suma trafień"]
+        wyswietl = f"{nazwisko} [{konk}]"
 
-            if czy_ma_wynik(suma):
-                continue
-
-            if typ == "Standard":
-                wyswietl = nazwisko
-            else:
-                wyswietl = f"{nazwisko} [PK]"
-
-            wynik.append({
-                "wyswietl": wyswietl,
-                "nazwisko": nazwisko,
-                "typ": typ,
-            })
+        wynik.append({
+            "wyswietl": wyswietl,
+            "nazwisko": nazwisko,
+            "konkurencja": konk,
+        })
 
     return wynik
 
 
-
-
 def zapisz_pusty_start_zmiany(path: Path) -> None:
-    """
-    Od razu po rozpoczęciu zmiany rezerwuje w aktywnym Excelu informację,
-    kto strzela w tej zmianie. Dzięki temu plik zawodów od razu jest bazą roboczą.
-    """
     df = wczytaj_excel(path)
 
     for kolejnosc, zaw in enumerate(st.session_state.wybrani_zawodnicy, start=1):
         nazwisko = zaw["nazwisko"]
-        typ = zaw["typ"]
+        konkurencja = zaw["konkurencja"]
 
         maska = (
             (df["Nazwisko"] == nazwisko)
-            & (df["Typ"] == typ)
+            & (df[KOLUMNA_KONKURENCJA] == konkurencja)
             & (df["Zmiana"] == st.session_state.nazwa_zmiany)
         )
 
         if maska.any():
             continue
 
-        indeksy = df[df["Nazwisko"] == nazwisko].index.tolist()
+        indeksy = df[
+            (df["Nazwisko"] == nazwisko)
+            & (df[KOLUMNA_KONKURENCJA] == konkurencja)
+        ].index.tolist()
+
         pusty_idx = None
 
         for idx in indeksy:
-            typ_wiersza = wykryj_typ_zawodnika(df, nazwisko, idx)
-            if typ_wiersza == typ and not czy_ma_wynik(df.at[idx, "Suma trafień"]):
+            if not czy_ma_wynik(df.at[idx, "Suma trafień"]):
                 pusty_idx = idx
                 break
 
         if pusty_idx is not None:
             df.at[pusty_idx, "Zmiana"] = st.session_state.nazwa_zmiany
-            df.at[pusty_idx, "Typ"] = typ
+            df.at[pusty_idx, KOLUMNA_KONKURENCJA] = konkurencja
             df.at[pusty_idx, "Status"] = "W TRAKCIE"
             df.at[pusty_idx, KOLUMNA_KOLEJNOSC] = str(kolejnosc)
             df.at[pusty_idx, KOLUMNA_LIMIT] = str(st.session_state.limit_rzutkow)
         else:
-            nowy = {col: "" for col in WYMAGANE_KOLUMNY + KOLUMNY_STRZALOW}
+            nowy = {col: "" for col in WYMAGANE_KOLUMNY + [KOLUMNA_LIMIT, KOLUMNA_KOLEJNOSC] + KOLUMNY_STRZALOW}
             nowy["Nazwisko"] = nazwisko
             nowy["Zmiana"] = st.session_state.nazwa_zmiany
-            nowy["Typ"] = typ
+            nowy[KOLUMNA_KONKURENCJA] = konkurencja
             nowy["Status"] = "W TRAKCIE"
             nowy[KOLUMNA_KOLEJNOSC] = str(kolejnosc)
             nowy[KOLUMNA_LIMIT] = str(st.session_state.limit_rzutkow)
@@ -650,11 +1019,6 @@ def zapisz_pusty_start_zmiany(path: Path) -> None:
 
 
 def zapisz_robocze_strzaly_zmiany(path: Path) -> None:
-    """
-    Awaryjny zapis po każdym kliknięciu podczas strzelania.
-    Zapisuje aktualnie wpisane strzały do aktywnego Excela jako W TRAKCIE,
-    ale nie wpisuje jeszcze sumy końcowej, żeby niedokończona zmiana nie weszła do rankingu.
-    """
     if not st.session_state.get("wybrani_zawodnicy"):
         return
 
@@ -662,23 +1026,23 @@ def zapisz_robocze_strzaly_zmiany(path: Path) -> None:
 
     for kolejnosc, zaw in enumerate(st.session_state.wybrani_zawodnicy, start=1):
         nazwisko = zaw["nazwisko"]
-        typ = zaw["typ"]
+        konkurencja = zaw["konkurencja"]
         id_u = zaw["id_unikalne"]
         strzaly = st.session_state.macierz_wynikow.get(id_u, [])
 
         maska = (
             (df["Nazwisko"] == nazwisko)
-            & (df["Typ"] == typ)
+            & (df[KOLUMNA_KONKURENCJA] == konkurencja)
             & (df["Zmiana"] == st.session_state.nazwa_zmiany)
         )
 
         if maska.any():
             idx = df[maska].index[0]
         else:
-            nowy = {col: "" for col in WYMAGANE_KOLUMNY + KOLUMNY_STRZALOW}
+            nowy = {col: "" for col in WYMAGANE_KOLUMNY + [KOLUMNA_LIMIT, KOLUMNA_KOLEJNOSC] + KOLUMNY_STRZALOW}
             nowy["Nazwisko"] = nazwisko
             nowy["Zmiana"] = st.session_state.nazwa_zmiany
-            nowy["Typ"] = typ
+            nowy[KOLUMNA_KONKURENCJA] = konkurencja
             nowy[KOLUMNA_KOLEJNOSC] = str(kolejnosc)
             nowy[KOLUMNA_LIMIT] = str(st.session_state.limit_rzutkow)
             df = pd.concat([df, pd.DataFrame([nowy])], ignore_index=True)
@@ -702,7 +1066,7 @@ def zapisz_wyniki_zmiany(path: Path) -> None:
 
     for kolejnosc, zaw in enumerate(st.session_state.wybrani_zawodnicy, start=1):
         nazwisko = zaw["nazwisko"]
-        typ = zaw["typ"]
+        konkurencja = zaw["konkurencja"]
         id_u = zaw["id_unikalne"]
 
         strzaly = st.session_state.macierz_wynikow.get(id_u, [])
@@ -711,23 +1075,23 @@ def zapisz_wyniki_zmiany(path: Path) -> None:
 
         maska = (
             (df["Nazwisko"] == nazwisko)
-            & (df["Typ"] == typ)
+            & (df[KOLUMNA_KONKURENCJA] == konkurencja)
             & (df["Zmiana"] == st.session_state.nazwa_zmiany)
         )
 
         if maska.any():
             idx = df[maska].index[0]
         else:
-            nowy = {col: "" for col in WYMAGANE_KOLUMNY + KOLUMNY_STRZALOW}
+            nowy = {col: "" for col in WYMAGANE_KOLUMNY + [KOLUMNA_LIMIT, KOLUMNA_KOLEJNOSC] + KOLUMNY_STRZALOW}
             nowy["Nazwisko"] = nazwisko
             nowy["Zmiana"] = st.session_state.nazwa_zmiany
-            nowy["Typ"] = typ
+            nowy[KOLUMNA_KONKURENCJA] = konkurencja
             nowy[KOLUMNA_KOLEJNOSC] = str(kolejnosc)
             nowy[KOLUMNA_LIMIT] = str(st.session_state.limit_rzutkow)
             df = pd.concat([df, pd.DataFrame([nowy])], ignore_index=True)
             idx = df.index[-1]
 
-        df.at[idx, "Status"] = "STANDARD ZAKOŃCZONY" if typ == "Standard" else "PK ZAKOŃCZONE"
+        df.at[idx, "Status"] = f"{konkurencja} ZAKOŃCZONE"
         df.at[idx, KOLUMNA_KOLEJNOSC] = str(kolejnosc)
         df.at[idx, KOLUMNA_LIMIT] = str(st.session_state.limit_rzutkow)
         df.at[idx, "Suma trafień"] = suma
@@ -741,10 +1105,6 @@ def zapisz_wyniki_zmiany(path: Path) -> None:
 
 
 def znajdz_przerwana_zmiane(df_input: pd.DataFrame) -> dict | None:
-    """
-    Szuka w aktywnym Excelu zmiany oznaczonej jako W TRAKCIE.
-    Zwraca dane potrzebne do pokazania przycisku wznowienia.
-    """
     if df_input.empty or "Status" not in df_input.columns or "Zmiana" not in df_input.columns:
         return None
 
@@ -754,7 +1114,6 @@ def znajdz_przerwana_zmiane(df_input: pd.DataFrame) -> dict | None:
     if robocze.empty:
         return None
 
-    # Bierzemy ostatnią/najnowszą zmianę z pliku. Przy normalnej pracy będzie tylko jedna.
     nazwy_zmian = [z for z in robocze["Zmiana"].dropna().astype(str).unique() if z.strip()]
     if not nazwy_zmian:
         return None
@@ -762,11 +1121,13 @@ def znajdz_przerwana_zmiane(df_input: pd.DataFrame) -> dict | None:
     nazwa_zmiany = nazwy_zmian[-1]
     robocze = robocze[robocze["Zmiana"].astype(str) == nazwa_zmiany].copy()
 
+    konkurencje = robocze[KOLUMNA_KONKURENCJA].dropna().astype(str).unique().tolist()
+    konkurencja = konkurencje[0] if konkurencje else ""
+
     limit_series = pd.to_numeric(robocze.get(KOLUMNA_LIMIT, pd.Series(dtype=str)), errors="coerce").dropna()
     if not limit_series.empty:
         limit = int(limit_series.iloc[0])
     else:
-        # Awaryjnie dla starszych kopii, które nie mają jeszcze kolumny Limit rzutków.
         ostatni_zapisany = 0
         for i in range(1, MAX_RZUTKOW + 1):
             col = f"Strzał_{i}"
@@ -774,21 +1135,18 @@ def znajdz_przerwana_zmiane(df_input: pd.DataFrame) -> dict | None:
                 ma_dane = robocze[col].astype(str).str.strip().replace({"nan": "", "None": ""})
                 if ma_dane.apply(lambda x: x not in ["", "-"]).any():
                     ostatni_zapisany = i
-        limit = max(20, ostatni_zapisany)
+        limit = max(10, ostatni_zapisany)
         limit = min(limit, MAX_RZUTKOW)
 
     return {
         "nazwa_zmiany": nazwa_zmiany,
+        "konkurencja": konkurencja,
         "liczba_zawodnikow": len(robocze),
         "limit": limit,
     }
 
 
 def wznow_przerwana_zmiane(path: Path, nazwa_zmiany: str | None = None) -> bool:
-    """
-    Odbudowuje session_state z Excela po resecie Streamlit.
-    Przywraca listę zawodników, macierz strzałów i następne pole do wpisania.
-    """
     df = wczytaj_excel(path)
     robocze = df[df["Status"].str.upper().str.strip() == "W TRAKCIE"].copy()
 
@@ -824,7 +1182,7 @@ def wznow_przerwana_zmiane(path: Path, nazwa_zmiany: str | None = None) -> bool:
                 ma_dane = robocze[col].astype(str).str.strip().replace({"nan": "", "None": ""})
                 if ma_dane.apply(lambda x: x not in ["", "-"]).any():
                     ostatni_zapisany = i
-        limit = max(20, ostatni_zapisany)
+        limit = max(10, ostatni_zapisany)
         limit = min(limit, MAX_RZUTKOW)
 
     wybrani = []
@@ -832,8 +1190,8 @@ def wznow_przerwana_zmiane(path: Path, nazwa_zmiany: str | None = None) -> bool:
 
     for _, row in robocze.iterrows():
         nazwisko = str(row.get("Nazwisko", "")).strip().upper()
-        typ = str(row.get("Typ", "Standard")).strip() or "Standard"
-        id_unikalne = f"{nazwisko} [PK]" if typ == "PK" else nazwisko
+        konkurencja = normalizuj_konkurencje(row.get(KOLUMNA_KONKURENCJA, "TRAP20"))
+        id_unikalne = f"{nazwisko} [{konkurencja}]"
 
         if not nazwisko:
             continue
@@ -841,7 +1199,7 @@ def wznow_przerwana_zmiane(path: Path, nazwa_zmiany: str | None = None) -> bool:
         wybrani.append({
             "nazwisko": nazwisko,
             "id_unikalne": id_unikalne,
-            "typ": typ,
+            "konkurencja": konkurencja,
         })
 
         strzaly = []
@@ -876,11 +1234,13 @@ def wznow_przerwana_zmiane(path: Path, nazwa_zmiany: str | None = None) -> bool:
     st.session_state.aktualny_strzal = aktualny_strzal
     st.session_state.aktualny_zawodnik_idx = aktualny_zawodnik_idx
     st.session_state.limit_rzutkow = limit
+    st.session_state.konkurencja_zmiany = wybrani[0]["konkurencja"]
     st.session_state.nazwa_zmiany = str(nazwa_zmiany)
     st.session_state.zapisano_zmiane = ""
     st.session_state.kopia_pobrana = False
 
     return True
+
 
 def zakoncz_i_wroc_do_menu():
     st.session_state.tryb_pracy = "MENU"
@@ -889,6 +1249,15 @@ def zakoncz_i_wroc_do_menu():
     st.session_state.aktualny_strzal = 0
     st.session_state.aktualny_zawodnik_idx = 0
     st.session_state.zapisano_zmiane = ""
+
+
+def zamknij_zawody_do_archiwum(path: Path) -> Path | None:
+    if not path.exists():
+        return None
+
+    arch_path = bezpieczna_nazwa_archiwum(path)
+    shutil.move(str(path), str(arch_path))
+    return arch_path
 
 
 # ============================================================
@@ -904,10 +1273,17 @@ defaults = {
     "aktualny_strzal": 0,
     "aktualny_zawodnik_idx": 0,
     "limit_rzutkow": 20,
+    "konkurencja_zmiany": "TRAP20",
     "nazwa_zmiany": "",
     "reset_wyszukiwarki": 0,
     "kopia_pobrana": False,
     "ostatnio_przywrocony_upload": "",
+    "zawody_zakonczone": False,
+    "event_id": "default",
+    "event_name": "",
+    "event_cfg": {},
+    "admin_logged": False,
+    "admin_mode": False,
 }
 
 for k, v in defaults.items():
@@ -924,6 +1300,14 @@ if isinstance(view_param, list):
     view_param = view_param[0] if view_param else "admin"
 
 TRYB_ZAWODNIKA = str(view_param).strip().lower() in ["zawodnik", "wyniki", "public"]
+
+event_param = st.query_params.get("event", "")
+if isinstance(event_param, list):
+    event_param = event_param[0] if event_param else ""
+
+if str(event_param).strip():
+    # Link publiczny może wyglądać: ?event=snajper_lublin_20260620&view=zawodnik
+    ustaw_event(str(event_param).strip(), str(event_param).strip(), {})
 
 if TRYB_ZAWODNIKA:
     st.markdown(
@@ -945,22 +1329,40 @@ if TRYB_ZAWODNIKA:
 if not TRYB_ZAWODNIKA:
     st.sidebar.header("📁 Plik zawodów")
 
-    # ------------------------------------------------------------
-    # KODY LIST KLUBOWYCH
-    # ------------------------------------------------------------
-    # To są wygodne skróty dla sędziów.
-    # Nie jest to zabezpieczenie, tylko prosty sposób, żeby nie wpisywać długiego linku.
-    KODY_LIST = {
-        "snajper": "https://docs.google.com/spreadsheets/d/1I8OGAXZEDWY3wgP_hKaepQF390BCUwxMBOrcPDJmlhA/edit?gid=0#gid=0",
-    }
+    EVENTS = wczytaj_events()
+
+    with st.sidebar.expander("🔐 Administrator", expanded=False):
+        if st.session_state.get("admin_logged", False):
+            st.success("Zalogowano jako administrator.")
+            st.session_state.admin_mode = st.checkbox(
+                "Otwórz panel administratora",
+                value=bool(st.session_state.get("admin_mode", False)),
+            )
+
+            if st.button("Wyloguj administratora", use_container_width=True):
+                st.session_state.admin_logged = False
+                st.session_state.admin_mode = False
+                st.rerun()
+        else:
+            admin_pass = st.text_input("Hasło administratora:", type="password")
+            if st.button("Zaloguj", use_container_width=True):
+                if admin_pass == haslo_admina(EVENTS):
+                    st.session_state.admin_logged = True
+                    st.session_state.admin_mode = True
+                    st.rerun()
+                else:
+                    st.error("Nieprawidłowe hasło administratora.")
+
+    if st.session_state.get("event_name"):
+        st.sidebar.caption(f"Aktywne zawody: {st.session_state.event_name}")
+        st.sidebar.caption(f"ID: {aktywny_event_id()}")
 
     kod_listy = st.sidebar.text_input(
-        "Kod listy klubowej:",
-        placeholder="np. Ala ma kota a kot ma strzelbę ;)",
+        "Kod zawodów:",
+        placeholder="np. snajper",
     ).strip().lower()
 
     uzyj_wlasnego_linku = st.sidebar.checkbox("Użyj własnego linku Google Sheets")
-
     wlasny_link = ""
 
     if uzyj_wlasnego_linku:
@@ -976,30 +1378,47 @@ if not TRYB_ZAWODNIKA:
             link_do_pobrania = ""
 
             if kod_listy:
-                if kod_listy not in KODY_LIST:
-                    st.sidebar.error("Nieznany kod listy klubowej.")
+                if kod_listy not in EVENTS:
+                    st.sidebar.error("Nieznany kod zawodów. Sprawdź events.json.")
                     st.stop()
 
-                link_do_pobrania = KODY_LIST[kod_listy]
+                event_cfg = EVENTS[kod_listy]
+                aktywny, komunikat = event_aktywny(event_cfg)
+                if not aktywny:
+                    st.sidebar.error(komunikat)
+                    st.stop()
+
+                link_do_pobrania = str(event_cfg.get("google_sheet", "")).strip()
+                if not link_do_pobrania:
+                    st.sidebar.error("W events.json brakuje pola google_sheet dla tego kodu.")
+                    st.stop()
+
+                event_id = event_cfg.get("event_id", kod_listy)
+                event_name = event_cfg.get("nazwa", event_id)
+                ustaw_event(event_id, event_name, event_cfg)
 
             elif uzyj_wlasnego_linku:
                 if not wlasny_link:
                     st.sidebar.error("Wklej własny link Google Sheets.")
                     st.stop()
-
+                tymczasowy_event_id = f"manual_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                ustaw_event(tymczasowy_event_id, "Zawody ręczne", {"enabled": True, "google_sheet": wlasny_link})
                 link_do_pobrania = wlasny_link
 
             else:
-                st.sidebar.error("Wpisz kod listy klubowej albo zaznacz własny link.")
+                st.sidebar.error("Wpisz kod zawodów z events.json albo zaznacz własny link.")
                 st.stop()
 
             df_google = pobierz_liste_z_google(link_do_pobrania)
             nowy_plik = nazwa_nowego_pliku()
             zapisz_excel(df_google, nowy_plik)
 
+            st.session_state.zawody_zakonczone = False
             st.session_state.aktywny_plik = str(nowy_plik)
+
             if "custom_google_link" in st.session_state:
                 st.session_state.custom_google_link = ""
+
             zakoncz_i_wroc_do_menu()
 
             st.sidebar.success(f"Utworzono plik: {nowy_plik.name}")
@@ -1022,21 +1441,19 @@ if not TRYB_ZAWODNIKA:
 
         if st.session_state.get("ostatnio_przywrocony_upload", "") != upload_id:
             try:
-                # Jeżeli nazwa pliku nie jest zgodna ze schematem aplikacji,
-                # nadajemy bezpieczną nazwę, żeby plik pojawił się na liście zawodów.
                 if upload_backup.name.startswith("trap20_zawody_") and upload_backup.name.endswith(".xlsx"):
                     backup_name = upload_backup.name
                 else:
                     znacznik = datetime.now().strftime("%Y%m%d_%H%M%S")
                     backup_name = f"trap20_zawody_przywrocony_{znacznik}.xlsx"
 
-                backup_path = DATA_DIR / backup_name
+                backup_path = aktywny_event_dir() / backup_name
                 backup_path.write_bytes(upload_backup.getbuffer())
 
-                # Próba odczytu od razu waliduje, czy to jest poprawny plik Excel dla programu.
                 df_backup = wczytaj_excel(backup_path)
                 zapisz_excel(df_backup, backup_path)
 
+                st.session_state.zawody_zakonczone = False
                 st.session_state.aktywny_plik = str(backup_path)
                 st.session_state.ostatnio_przywrocony_upload = upload_id
                 zakoncz_i_wroc_do_menu()
@@ -1051,7 +1468,7 @@ if not TRYB_ZAWODNIKA:
 
     pliki = lista_plikow_zawodow()
 
-    if pliki:
+    if pliki and not st.session_state.get("zawody_zakonczone", False):
         nazwy = [p.name for p in pliki]
 
         aktualny = aktywny_path()
@@ -1064,7 +1481,7 @@ if not TRYB_ZAWODNIKA:
             index=index,
         )
 
-        wybrany_path = DATA_DIR / wybor_pliku
+        wybrany_path = aktywny_event_dir() / wybor_pliku
 
         if str(wybrany_path) != st.session_state.aktywny_plik:
             st.session_state.aktywny_plik = str(wybrany_path)
@@ -1081,21 +1498,44 @@ if not TRYB_ZAWODNIKA:
 
         st.sidebar.markdown("---")
 
-        if st.sidebar.button("🗑️ Usuń aktywny plik zawodów", use_container_width=True):
+        if st.sidebar.button("📦 Zakończ zawody i przenieś do archiwum", use_container_width=True):
             try:
-                if wybrany_path.exists():
-                    wybrany_path.unlink()
+                arch_path = zamknij_zawody_do_archiwum(wybrany_path)
 
                 st.session_state.aktywny_plik = ""
+                st.session_state.zawody_zakonczone = True
+                st.session_state.google_link = ""
+
+                if "custom_google_link" in st.session_state:
+                    st.session_state.custom_google_link = ""
+
+                st.session_state.ostatnio_przywrocony_upload = ""
+                st.session_state.reset_wyszukiwarki = int(st.session_state.get("reset_wyszukiwarki", 0)) + 1
+
                 zakoncz_i_wroc_do_menu()
 
-                st.sidebar.success("Usunięto aktywny plik zawodów.")
+                if arch_path:
+                    st.sidebar.success(f"Zawody zakończone. Plik przeniesiono do archiwum: {arch_path.name}")
+                else:
+                    st.sidebar.success("Zawody zakończone.")
                 st.rerun()
 
             except Exception as e:
-                st.sidebar.error(f"Nie udało się usunąć pliku: {e}")
+                st.sidebar.error(f"Nie udało się zakończyć zawodów: {e}")
     else:
-        st.sidebar.warning("Brak pliku zawodów. Pobierz listę z Google.")
+        if st.session_state.get("zawody_zakonczone", False):
+            st.sidebar.success("Zawody zakończone. Utwórz nowy plik zawodów, aby rozpocząć kolejne.")
+        else:
+            st.sidebar.warning("Brak pliku zawodów dla aktywnego ID. Pobierz listę z Google.")
+
+
+# ============================================================
+# PANEL ADMINISTRATORA
+# ============================================================
+
+if not TRYB_ZAWODNIKA and st.session_state.get("admin_logged", False) and st.session_state.get("admin_mode", False):
+    pokaz_panel_administratora()
+    st.stop()
 
 
 # ============================================================
@@ -1105,7 +1545,10 @@ if not TRYB_ZAWODNIKA:
 path = aktywny_path()
 
 if path is None:
-    st.warning("Najpierw pobierz listę z Google i utwórz plik zawodów.")
+    if st.session_state.get("zawody_zakonczone", False):
+        st.success("Zawody zostały zakończone. Aby rozpocząć nowe, pobierz listę z Google i utwórz nowy plik zawodów.")
+    else:
+        st.warning("Najpierw wpisz kod zawodów / link Google i utwórz plik zawodów.")
     st.stop()
 
 df_baza = wczytaj_excel(path)
@@ -1116,6 +1559,7 @@ def pokaz_info_o_pliku_na_dole(path: Path) -> None:
         f"""
 <div class="file-info-footer">
     <div>Google służy tylko do pobrania listy. Cała praca odbywa się na aktywnym pliku Excel zawodów.</div>
+    <div style="margin-top: 6px;">Zawody: <code>{st.session_state.get("event_name") or aktywny_event_id()}</code></div>
     <div style="margin-top: 6px;">Aktywny plik: <code>{path.name}</code></div>
 </div>
 """,
@@ -1125,7 +1569,15 @@ def pokaz_info_o_pliku_na_dole(path: Path) -> None:
 
 def html_strzaly_dla_podgladu(row: pd.Series) -> str:
     html = ""
-    for i in range(1, MAX_RZUTKOW + 1):
+    limit = pd.to_numeric(row.get(KOLUMNA_LIMIT, MAX_RZUTKOW), errors="coerce")
+    try:
+        limit = int(limit)
+    except Exception:
+        limit = MAX_RZUTKOW
+
+    limit = max(1, min(limit, MAX_RZUTKOW))
+
+    for i in range(1, limit + 1):
         val = str(row.get(f"Strzał_{i}", "")).strip()
         if not val or val in ["-", "nan", "None"]:
             continue
@@ -1155,15 +1607,15 @@ def pokaz_panel_zawodnika(df: pd.DataFrame, path: Path) -> None:
 
     st.markdown("---")
 
-    tab1, tab2, tab3 = st.tabs(["🏆 Ranking Standard", "🎯 Ranking PK", "🔎 Sprawdź zawodnika"])
+    konkurencje = lista_konkurencji(df)
 
-    with tab1:
-        st.dataframe(zbuduj_ranking(df, "Standard"), use_container_width=True, hide_index=True)
+    tabs = st.tabs([f"🏆 {k}" for k in konkurencje] + ["🔎 Sprawdź zawodnika"])
 
-    with tab2:
-        st.dataframe(zbuduj_ranking(df, "PK"), use_container_width=True, hide_index=True)
+    for tab, konkurencja in zip(tabs[:-1], konkurencje):
+        with tab:
+            st.dataframe(zbuduj_ranking(df, konkurencja), use_container_width=True, hide_index=True)
 
-    with tab3:
+    with tabs[-1]:
         szukaj = st.text_input(
             "Wpisz nazwisko zawodnika:",
             placeholder="np. KOWALSKI",
@@ -1179,7 +1631,7 @@ def pokaz_panel_zawodnika(df: pd.DataFrame, path: Path) -> None:
         if df_pokaz.empty:
             st.info("Brak zapisanych wyników dla podanego filtra.")
         else:
-            for _, row in df_pokaz.sort_values(["Nazwisko", "Typ", "Zmiana"]).iterrows():
+            for _, row in df_pokaz.sort_values(["Nazwisko", KOLUMNA_KONKURENCJA, "Zmiana"]).iterrows():
                 suma = str(row.get("Suma trafień", "")).strip() or "0"
                 pierwszy = str(row.get("Ile za pierwszym", "")).strip() or "0"
                 st.markdown(
@@ -1188,7 +1640,7 @@ def pokaz_panel_zawodnika(df: pd.DataFrame, path: Path) -> None:
     <div class="player-stand">{row.get('Zmiana', '')}</div>
     <div>
         <div class="player-name">{row.get('Nazwisko', '')}</div>
-        <div class="player-type">{row.get('Typ', '')}</div>
+        <div class="player-type">{row.get(KOLUMNA_KONKURENCJA, '')}</div>
     </div>
     <div class="player-shots">{html_strzaly_dla_podgladu(row)}</div>
     <div class="player-sum">{suma} / {pierwszy}</div>
@@ -1210,7 +1662,9 @@ if TRYB_ZAWODNIKA:
 # ============================================================
 
 if st.session_state.tryb_pracy == "MENU":
-    col_m1, col_m2, col_m3 = st.columns(3)
+    konkurencje_dostepne = lista_konkurencji(df_baza)
+
+    col_m1, col_m2, col_m3, col_m4 = st.columns([1, 2, 1, 1])
 
     with col_m1:
         nr_zmiany = st.number_input(
@@ -1221,15 +1675,36 @@ if st.session_state.tryb_pracy == "MENU":
         )
 
     with col_m2:
-        limit_rzutkow = st.selectbox("Liczba rzutków:", [10, 15, 20, 25], index=2)
+        index_konk = 0
+        if st.session_state.get("konkurencja_zmiany") in konkurencje_dostepne:
+            index_konk = konkurencje_dostepne.index(st.session_state.konkurencja_zmiany)
+
+        konkurencja_zmiany = st.selectbox(
+            "Konkurencja:",
+            konkurencje_dostepne,
+            index=index_konk,
+        )
+
+    suggested_limit = odczytaj_limit_z_konkurencji(konkurencja_zmiany, 20)
 
     with col_m3:
-        st.metric("Zawodnicy w pliku", df_baza["Nazwisko"].nunique())
+        opcje_limitow = [10, 15, 20, 25]
+        limit_index = opcje_limitow.index(suggested_limit) if suggested_limit in opcje_limitow else 2
+
+        limit_rzutkow = st.selectbox(
+            "Liczba rzutków:",
+            opcje_limitow,
+            index=limit_index,
+        )
+
+    with col_m4:
+        st.metric("Zawodnicy", df_baza["Nazwisko"].nunique())
 
     przerwana = znajdz_przerwana_zmiane(df_baza)
     if przerwana and not st.session_state.get("wybrani_zawodnicy"):
         st.warning(
             f"Wykryto przerwaną zmianę: {przerwana['nazwa_zmiany']} "
+            f"— {przerwana.get('konkurencja', '')} "
             f"({przerwana['liczba_zawodnikow']} zawodników, {przerwana['limit']} rzutków)."
         )
         if st.button("▶️ Wznów przerwaną zmianę", type="primary", use_container_width=True):
@@ -1241,7 +1716,7 @@ if st.session_state.tryb_pracy == "MENU":
     st.markdown("---")
     st.subheader("📋 Skład zmiany")
 
-    dostepni = zbuduj_liste_dostepnych(df_baza)
+    dostepni = zbuduj_liste_dostepnych(df_baza, konkurencja_zmiany)
 
     juz_dodani = {
         z["id_unikalne"]
@@ -1269,7 +1744,7 @@ if st.session_state.tryb_pracy == "MENU":
 
     opcje = [""] + [z["wyswietl"] for z in dostepni_po_filtrze]
 
-    col1, col2, col3 = st.columns([4, 3, 2])
+    col1, col2 = st.columns([4, 3])
 
     with col1:
         wybor = st.selectbox(
@@ -1289,60 +1764,41 @@ if st.session_state.tryb_pracy == "MENU":
             key="reczny_zawodnik",
         ).strip().upper()
 
-    with col3:
-        typ_reczny = st.selectbox(
-            "Typ:",
-            ["Standard", "PK"],
-            key="typ_reczny",
-        )
-
     if st.button("➕ Dodaj zawodnika", type="primary"):
         if len(st.session_state.wybrani_zawodnicy) >= 6:
             st.error("W jednej zmianie może być maksymalnie 6 zawodników.")
         else:
             nazwisko = ""
-            typ = ""
+            konkurencja = normalizuj_konkurencje(konkurencja_zmiany)
 
             if wybor and wybor.strip():
                 obj = next((z for z in dostepni if z["wyswietl"] == wybor), None)
 
                 if obj:
                     nazwisko = obj["nazwisko"]
-                    typ = obj["typ"]
+                    konkurencja = obj["konkurencja"]
 
             elif reczny:
                 nazwisko = reczny
-                typ = typ_reczny
 
             if not nazwisko:
                 st.error("Wybierz zawodnika albo wpisz nazwisko ręcznie.")
             else:
-                standard_zrobiony, pk_zrobiony = statusy_zawodnika(df_baza, nazwisko)
-
-                if typ == "Standard" and standard_zrobiony:
-                    st.error(f"{nazwisko} ma już wynik Standard. Może startować tylko jako PK.")
-
-                elif typ == "PK" and not standard_zrobiony:
-                    st.error(f"{nazwisko} nie ma jeszcze wyniku Standard. PK jest możliwe dopiero po Standardzie.")
-
-                elif typ == "PK" and pk_zrobiony:
-                    st.error(f"{nazwisko} ma już zapisany wynik PK.")
-
+                if status_startu(df_baza, nazwisko, konkurencja):
+                    st.error(f"{nazwisko} ma już zapisany wynik w konkurencji {konkurencja}.")
                 else:
-                    id_unikalne = f"{nazwisko} [PK]" if typ == "PK" else nazwisko
+                    id_unikalne = f"{nazwisko} [{konkurencja}]"
 
                     if id_unikalne in juz_dodani:
-                        st.error("Ten zawodnik jest już dodany do tej zmiany.")
+                        st.error("Ten start jest już dodany do tej zmiany.")
                     else:
                         st.session_state.wybrani_zawodnicy.append({
                             "nazwisko": nazwisko,
                             "id_unikalne": id_unikalne,
-                            "typ": typ,
+                            "konkurencja": konkurencja,
                         })
 
-                        # Po dodaniu zawodnika czyścimy wyszukiwarkę i wybór z listy.
                         st.session_state.reset_wyszukiwarki = int(st.session_state.get("reset_wyszukiwarki", 0)) + 1
-
                         st.rerun()
 
     if st.session_state.wybrani_zawodnicy:
@@ -1355,7 +1811,7 @@ if st.session_state.tryb_pracy == "MENU":
                 st.write(f"**S {i + 1}**")
 
             with c2:
-                st.info(f"{z['id_unikalne']} — {z['typ']}")
+                st.info(f"{z['id_unikalne']}")
 
             with c3:
                 if st.button("Usuń", key=f"del_{i}"):
@@ -1370,6 +1826,7 @@ if st.session_state.tryb_pracy == "MENU":
         else:
             st.session_state.tryb_pracy = "STRZELANIE"
             st.session_state.limit_rzutkow = int(limit_rzutkow)
+            st.session_state.konkurencja_zmiany = normalizuj_konkurencje(konkurencja_zmiany)
             st.session_state.nazwa_zmiany = f"Zmiana {nr_zmiany}"
             st.session_state.aktualny_strzal = 0
             st.session_state.aktualny_zawodnik_idx = 0
@@ -1387,15 +1844,14 @@ if st.session_state.tryb_pracy == "MENU":
     st.markdown("---")
     st.subheader("📊 Rankingi z aktywnego pliku")
 
-    tab1, tab2, tab3 = st.tabs(["🏆 Standard", "🎯 PK", "📄 Wyniki szczegółowe"])
+    konkurencje = lista_konkurencji(df_baza)
+    tabs = st.tabs([f"🏆 {k}" for k in konkurencje] + ["📄 Wyniki szczegółowe"])
 
-    with tab1:
-        st.dataframe(zbuduj_ranking(df_baza, "Standard"), use_container_width=True, hide_index=True)
+    for tab, konkurencja in zip(tabs[:-1], konkurencje):
+        with tab:
+            st.dataframe(zbuduj_ranking(df_baza, konkurencja), use_container_width=True, hide_index=True)
 
-    with tab2:
-        st.dataframe(zbuduj_ranking(df_baza, "PK"), use_container_width=True, hide_index=True)
-
-    with tab3:
+    with tabs[-1]:
         st.dataframe(df_baza, use_container_width=True, hide_index=True)
 
     pokaz_info_o_pliku_na_dole(path)
@@ -1408,7 +1864,10 @@ if st.session_state.tryb_pracy == "MENU":
 elif st.session_state.tryb_pracy == "STRZELANIE":
     limit = int(st.session_state.limit_rzutkow)
 
-    st.subheader(f"🏟️ {st.session_state.nazwa_zmiany} — {limit} rzutków")
+    st.subheader(
+        f"🏟️ {st.session_state.nazwa_zmiany} — "
+        f"{st.session_state.get('konkurencja_zmiany', '')} — {limit} rzutków"
+    )
 
     for i, z in enumerate(st.session_state.wybrani_zawodnicy):
         id_u = z["id_unikalne"]
@@ -1451,7 +1910,7 @@ elif st.session_state.tryb_pracy == "STRZELANIE":
     <div class="player-stand">S {i + 1}</div>
     <div>
         <div class="player-name">{id_u}</div>
-        <div class="player-type">{z["typ"]}</div>
+        <div class="player-type">{z["konkurencja"]}</div>
     </div>
     <div class="player-shots">{html}</div>
     <div class="player-sum">{suma} / {pierwszy}</div>
@@ -1463,7 +1922,6 @@ elif st.session_state.tryb_pracy == "STRZELANIE":
     st.markdown("---")
 
     def rejestruj(symbol: str):
-        # twarda blokada przed kliknięciami po limicie
         if st.session_state.aktualny_strzal >= int(st.session_state.limit_rzutkow):
             return
 
@@ -1487,8 +1945,6 @@ elif st.session_state.tryb_pracy == "STRZELANIE":
             st.session_state.aktualny_zawodnik_idx = 0
             st.session_state.aktualny_strzal += 1
 
-        # Awaryjny zapis bieżących strzałów po każdym kliknięciu.
-        # Chroni przed zwykłym odświeżeniem/resetem sesji Streamlit w trakcie zmiany.
         try:
             zapisz_robocze_strzaly_zmiany(path)
         except Exception as e:
@@ -1497,7 +1953,6 @@ elif st.session_state.tryb_pracy == "STRZELANIE":
     if st.session_state.aktualny_strzal >= limit:
         st.success("🔥 Zmiana zakończona.")
 
-        # zapisujemy wyniki automatycznie po wejściu w stan zakończenia
         if "zapisano_zmiane" not in st.session_state:
             st.session_state.zapisano_zmiane = ""
 
