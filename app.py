@@ -629,20 +629,47 @@ def event_aktywny(event_cfg: dict) -> tuple[bool, str]:
     aktywny_od = str(event_cfg.get("aktywny_od", "")).strip()
     aktywny_do = str(event_cfg.get("aktywny_do", "")).strip()
 
-    if not aktywny_od or not aktywny_do:
+    if not aktywny_od and not aktywny_do:
         return True, ""
+
+    def parse_date(txt: str, end_of_day: bool = False):
+        if not txt:
+            return None
+
+        txt = txt.strip()
+
+        try:
+            return datetime.strptime(txt, "%Y-%m-%d %H:%M")
+        except Exception:
+            pass
+
+        try:
+            d = datetime.strptime(txt, "%Y-%m-%d")
+
+            if end_of_day:
+                return d.replace(hour=23, minute=59, second=59)
+
+            return d.replace(hour=0, minute=0, second=0)
+
+        except Exception:
+            raise ValueError(txt)
 
     try:
         teraz = datetime.now()
-        od = datetime.strptime(aktywny_od, "%Y-%m-%d %H:%M")
-        do = datetime.strptime(aktywny_do, "%Y-%m-%d %H:%M")
-    except Exception:
-        return False, "Błędny format daty w TRAP_CONFIG. Użyj: RRRR-MM-DD HH:MM."
 
-    if teraz < od:
+        od = parse_date(aktywny_od)
+        do = parse_date(aktywny_do, end_of_day=True)
+
+    except Exception:
+        return (
+            False,
+            "Błędny format daty w TRAP_CONFIG. Użyj RRRR-MM-DD lub RRRR-MM-DD GG:MM."
+        )
+
+    if od and teraz < od:
         return False, f"Kod będzie aktywny od {aktywny_od}."
 
-    if teraz > do:
+    if do and teraz > do:
         return False, f"Kod wygasł {aktywny_do}."
 
     return True, ""
