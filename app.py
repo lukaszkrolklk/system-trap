@@ -600,69 +600,120 @@ def pokaz_panel_administratora() -> None:
                     use_container_width=True,
                 )
 
-                st.markdown("---")
-                st.markdown("#### 🗑️ Usuń wybrany plik archiwalny")
+            st.markdown("---")
+            st.markdown("#### 📦 Przenieś aktywne pliki eventu do archiwum")
 
-                czy_archiwum = wybor_pliku.startswith("ARCHIWUM |")
+            eventy_aktywne = sorted({
+                r["event_id"]
+                for r in wszystkie_pliki
+                if r["Typ"] == "AKTYWNE"
+            })
 
-                if czy_archiwum:
-                    potwierdz_usuniecie = st.checkbox(
-                        f"Potwierdzam usunięcie pliku: {file_path.name}",
-                        key=f"confirm_delete_file_{file_path.name}",
-                    )
+            if eventy_aktywne:
+                event_id_do_archiwizacji = st.selectbox(
+                    "Wybierz event_id do przeniesienia aktywnych plików:",
+                    eventy_aktywne,
+                    key="event_id_move_active_to_archive",
+                )
 
-                    if potwierdz_usuniecie:
-                        if st.button("🗑️ Usuń wybrany plik archiwalny", use_container_width=True):
-                            try:
-                                file_path.unlink()
-                                st.success(f"Usunięto plik archiwalny: {file_path.name}")
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Nie udało się usunąć pliku: {e}")
-                else:
-                    st.info("Usuwanie jest dostępne tylko dla plików z ARCHIWUM. Aktywnych zawodów nie usuwamy.")
+                aktywny_dir = DATA_DIR / event_id_do_archiwizacji
+                arch_dir = ARCHIWUM_DIR / event_id_do_archiwizacji
+                arch_dir.mkdir(parents=True, exist_ok=True)
 
-                st.markdown("---")
-                st.markdown("#### ⚠️ Wyczyść całe archiwum eventu")
+                aktywne_pliki = list(aktywny_dir.glob("*.xlsx")) if aktywny_dir.exists() else []
 
-                eventy_archiwum = sorted({
-                    r["event_id"]
-                    for r in wszystkie_pliki
-                    if r["Typ"] == "ARCHIWUM"
-                })
+                st.warning(
+                    f"To przeniesie {len(aktywne_pliki)} aktywne pliki eventu "
+                    f"{event_id_do_archiwizacji} do archiwum."
+                )
 
-                if eventy_archiwum:
-                    event_id_do_czyszczenia = st.selectbox(
-                        "Wybierz event_id do wyczyszczenia archiwum:",
-                        eventy_archiwum,
-                        key="event_id_clear_archive",
-                    )
+                potwierdz_przeniesienie = st.checkbox(
+                    f"Potwierdzam przeniesienie aktywnych plików eventu {event_id_do_archiwizacji} do archiwum",
+                    key=f"confirm_move_active_{event_id_do_archiwizacji}",
+                )
 
-                    arch_dir = ARCHIWUM_DIR / event_id_do_czyszczenia
-                    liczba_archiwum = len(list(arch_dir.glob("*.xlsx"))) if arch_dir.exists() else 0
+                if potwierdz_przeniesienie:
+                    if st.button("📦 Przenieś aktywne pliki do archiwum", use_container_width=True):
+                        try:
+                            for plik in aktywne_pliki:
+                                arch_path = arch_dir / (
+                                    f"{plik.stem}_ARCHIWUM_{datetime.now().strftime('%Y%m%d_%H%M%S')}{plik.suffix}"
+                                )
+                                shutil.move(str(plik), str(arch_path))
 
-                    st.warning(
-                        f"To usunie {liczba_archiwum} plików z archiwum eventu: {event_id_do_czyszczenia}"
-                    )
+                            if st.session_state.get("event_id") == event_id_do_archiwizacji:
+                                st.session_state.aktywny_plik = ""
 
-                    potwierdz_cale = st.checkbox(
-                        f"Potwierdzam wyczyszczenie całego archiwum eventu {event_id_do_czyszczenia}",
-                        key=f"confirm_clear_archive_{event_id_do_czyszczenia}",
-                    )
+                            st.success(f"Przeniesiono {len(aktywne_pliki)} plików do archiwum.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Nie udało się przenieść plików do archiwum: {e}")
+            else:
+                st.info("Brak aktywnych plików do przeniesienia.")
 
-                    if potwierdz_cale:
-                        if st.button("🗑️ Wyczyść archiwum tego eventu", use_container_width=True):
-                            try:
-                                if arch_dir.exists():
-                                    for plik in arch_dir.glob("*.xlsx"):
-                                        plik.unlink()
+            st.markdown("---")
+            st.markdown("#### 🗑️ Usuń wybrany plik archiwalny")
 
-                                st.success(f"Wyczyszczono archiwum eventu: {event_id_do_czyszczenia}")
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Nie udało się wyczyścić archiwum: {e}")
-                else:
-                    st.info("Brak plików archiwalnych do wyczyszczenia.")
+            czy_archiwum = wybor_pliku.startswith("ARCHIWUM |")
+
+            if czy_archiwum:
+                potwierdz_usuniecie = st.checkbox(
+                    f"Potwierdzam usunięcie pliku: {file_path.name}",
+                    key=f"confirm_delete_file_{file_path.name}",
+                )
+
+                if potwierdz_usuniecie:
+                    if st.button("🗑️ Usuń wybrany plik archiwalny", use_container_width=True):
+                        try:
+                            file_path.unlink()
+                            st.success(f"Usunięto plik archiwalny: {file_path.name}")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Nie udało się usunąć pliku: {e}")
+            else:
+                st.info("Usuwanie jest dostępne tylko dla plików z ARCHIWUM. Aktywnych zawodów nie usuwamy.")
+
+            st.markdown("---")
+            st.markdown("#### ⚠️ Wyczyść całe archiwum eventu")
+
+            eventy_archiwum = sorted({
+                r["event_id"]
+                for r in wszystkie_pliki
+                if r["Typ"] == "ARCHIWUM"
+            })
+
+            if eventy_archiwum:
+                event_id_do_czyszczenia = st.selectbox(
+                    "Wybierz event_id do wyczyszczenia archiwum:",
+                    eventy_archiwum,
+                    key="event_id_clear_archive",
+                )
+
+                arch_dir = ARCHIWUM_DIR / event_id_do_czyszczenia
+                liczba_archiwum = len(list(arch_dir.glob("*.xlsx"))) if arch_dir.exists() else 0
+
+                st.warning(
+                    f"To usunie {liczba_archiwum} plików z archiwum eventu: {event_id_do_czyszczenia}"
+                )
+
+                potwierdz_cale = st.checkbox(
+                    f"Potwierdzam wyczyszczenie całego archiwum eventu {event_id_do_czyszczenia}",
+                    key=f"confirm_clear_archive_{event_id_do_czyszczenia}",
+                )
+
+                if potwierdz_cale:
+                    if st.button("🗑️ Wyczyść archiwum tego eventu", use_container_width=True):
+                        try:
+                            if arch_dir.exists():
+                                for plik in arch_dir.glob("*.xlsx"):
+                                    plik.unlink()
+
+                            st.success(f"Wyczyszczono archiwum eventu: {event_id_do_czyszczenia}")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Nie udało się wyczyścić archiwum: {e}")
+            else:
+                st.info("Brak plików archiwalnych do wyczyszczenia.")
         else:
             st.info("Brak plików aktywnych i archiwalnych.")
 
