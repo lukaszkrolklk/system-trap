@@ -3,3 +3,5 @@ st-files-connection
 st-gsheets-connection
 pandas
 openpyxl
+qrcode
+Pillow
