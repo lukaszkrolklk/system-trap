@@ -1591,27 +1591,6 @@ if not TRYB_ZAWODNIKA:
 
     EVENTS = wczytaj_events()
 
-    with st.sidebar.expander("🔐 Administrator", expanded=False):
-        if st.session_state.get("admin_logged", False):
-            st.success("Zalogowano jako administrator.")
-            st.session_state.admin_mode = st.checkbox(
-                "Otwórz panel administratora",
-                value=bool(st.session_state.get("admin_mode", False)),
-            )
-
-            if st.button("Wyloguj administratora", use_container_width=True):
-                st.session_state.admin_logged = False
-                st.session_state.admin_mode = False
-                st.rerun()
-        else:
-            admin_pass = st.text_input("Hasło administratora:", type="password")
-            if st.button("Zaloguj", use_container_width=True):
-                if admin_pass == haslo_admina(EVENTS):
-                    st.session_state.admin_logged = True
-                    st.session_state.admin_mode = True
-                    st.rerun()
-                else:
-                    st.error("Nieprawidłowe hasło administratora.")
 
     if st.session_state.get("event_name"):
         st.sidebar.caption(f"Aktywne zawody: {st.session_state.event_name}")
@@ -1794,6 +1773,40 @@ if not TRYB_ZAWODNIKA:
 # ============================================================
 # PANEL ADMINISTRATORA
 # ============================================================
+
+    st.sidebar.markdown("---")
+
+    col_admin_btn, _ = st.sidebar.columns([1, 5])
+
+    with col_admin_btn:
+        if st.button("⚙️", help="Panel serwisowy", key="btn_show_admin_sidebar"):
+            st.session_state.show_admin_sidebar = not st.session_state.get("show_admin_sidebar", False)
+            st.rerun()
+
+    if st.session_state.get("show_admin_sidebar", False):
+        with st.sidebar.expander("⚙️ Serwis", expanded=True):
+            if st.session_state.get("admin_logged", False):
+                st.success("Zalogowano jako administrator.")
+
+                st.session_state.admin_mode = st.checkbox(
+                    "Otwórz panel administratora",
+                    value=bool(st.session_state.get("admin_mode", False)),
+                )
+
+                if st.button("Wyloguj administratora", use_container_width=True):
+                    st.session_state.admin_logged = False
+                    st.session_state.admin_mode = False
+                    st.rerun()
+            else:
+                admin_pass = st.text_input("Hasło administratora:", type="password")
+
+                if st.button("Zaloguj", use_container_width=True):
+                    if admin_pass == haslo_admina(EVENTS):
+                        st.session_state.admin_logged = True
+                        st.session_state.admin_mode = True
+                        st.rerun()
+                    else:
+                        st.error("Nieprawidłowe hasło administratora.")
 
 if not TRYB_ZAWODNIKA and st.session_state.get("admin_logged", False) and st.session_state.get("admin_mode", False):
     pokaz_panel_administratora()
