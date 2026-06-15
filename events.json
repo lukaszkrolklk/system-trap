@@ -1,15 +1,35 @@
 {
-  "_admin": {
-    "password": "TRAPADMIN"
-  },
-
   "snajper": {
     "enabled": true,
     "event_id": "Snajper",
     "nazwa": "Puchar",
     "google_sheet": "https://docs.google.com/spreadsheets/d/1I8OGAXZEDWY3wgP_hKaepQF390BCUwxMBOrcPDJmlhA/edit?usp=sharing",
+    "aktywny_od": "2026-06-20 07:00",
+    "aktywny_do": "2026-06-20 20:00",
+    "pk_wymaga_standard": false,
+    "konkurencje": {
+      "TRAP10": 10,
+      "TRAP20": 20,
+      "PK": 20,
+      "STANDARD": 20
+    }
+  },
+  "test": {
+    "enabled": true,
+    "event_id": "Test",
+    "nazwa": "Zawody",
+    "google_sheet": "https://docs.google.com/spreadsheets/d/1I8OGAXZEDWY3wgP_hKaepQF390BCUwxMBOrcPDJmlhA/edit?usp=sharing",
     "aktywny_od": "",
     "aktywny_do": "",
-    "pk_wymaga_standard": false
+    "pk_wymaga_standard": false,
+    "konkurencje": {
+      "TRAP10": 10,
+      "TRAP20": 20,
+      "PK": 20,
+      "STANDARD": 20
+    }
+  },
+  "_admin": {
+    "password": "TRAPADMIN"
   }
 }
