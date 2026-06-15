@@ -1752,8 +1752,6 @@ def pokaz_panel_zawodnika(df: pd.DataFrame, path: Path) -> None:
                     unsafe_allow_html=True,
                 )
 
-    pokaz_info_o_pliku_na_dole(path)
-
 
 if TRYB_ZAWODNIKA:
     pokaz_panel_zawodnika(df_baza, path)
