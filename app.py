@@ -1973,8 +1973,6 @@ if st.session_state.tryb_pracy == "MENU":
     with tabs[-1]:
         st.dataframe(df_baza, use_container_width=True, hide_index=True)
 
-    pokaz_info_o_pliku_na_dole(path)
-
 
 # ============================================================
 # STRZELANIE
