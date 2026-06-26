@@ -1,6 +1,10 @@
+import base64
 import json
+import os
 import re
 import shutil
+import urllib.error
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 
@@ -8,7 +12,7 @@ import pandas as pd
 import streamlit as st
 
 import qrcode
-from io import BytesIO
+from io import BytesIO, StringIO
 
 # ============================================================
 # KONFIGURACJA
@@ -23,9 +27,11 @@ st.set_page_config(
 APP_DIR = Path(__file__).parent
 DATA_DIR = APP_DIR / "data"
 ARCHIWUM_DIR = APP_DIR / "archiwum"
+PUBLIC_RESULTS_DIR = APP_DIR / "public_results"
 EVENTS_FILE = APP_DIR / "events.json"
 DATA_DIR.mkdir(exist_ok=True)
 ARCHIWUM_DIR.mkdir(exist_ok=True)
+PUBLIC_RESULTS_DIR.mkdir(exist_ok=True)
 
 MAX_RZUTKOW = 25
 
@@ -427,6 +433,9 @@ def wczytaj_events_z_trap_config(config_sheet_link: str) -> dict:
             "event_id": slugify_event_id(event_id_raw or kod),
             "nazwa": safe_cell(row, "nazwa", kod),
             "google_sheet": safe_cell(row, "google_sheet"),
+            "organizator": safe_cell(row, "organizator"),
+            "link_rezultaty": safe_cell(row, "link_rezultaty"),
+            "plik_rankingu": safe_cell(row, "plik_rankingu"),
             "aktywny_od": safe_cell(row, "aktywny_od"),
             "aktywny_do": safe_cell(row, "aktywny_do"),
             "pk_wymaga_standard": str_to_bool(safe_cell(row, "pk_wymaga_standard")),
@@ -489,6 +498,245 @@ def eventy_uzytkowe(events: dict) -> dict:
     }
 
 
+def pobierz_secret(name: str, default: str = "") -> str:
+    """Czyta ustawienie najpierw ze st.secrets, potem ze zmiennych środowiskowych."""
+    try:
+        if name in st.secrets:
+            return str(st.secrets.get(name, default)).strip()
+    except Exception:
+        pass
+
+    return str(os.environ.get(name, default)).strip()
+
+
+def aktualny_host() -> str:
+    try:
+        return str(st.context.headers.get("host", "")).lower()
+    except Exception:
+        return ""
+
+
+def czy_adres_lokalny(host: str) -> bool:
+    host = str(host).split(":")[0].strip().lower()
+    if host in ["localhost", "127.0.0.1", "0.0.0.0"]:
+        return True
+    if host.startswith("10.") or host.startswith("192.168."):
+        return True
+    if re.match(r"^172\.(1[6-9]|2\d|3[0-1])\.", host):
+        return True
+    return False
+
+
+def tryb_uruchomienia() -> str:
+    host = aktualny_host()
+    if host and czy_adres_lokalny(host):
+        return "LOKALNY"
+    if host:
+        return "ONLINE"
+    return "NIEZNANY"
+
+
+def sciezka_rankingu_online(event_id: str | None = None) -> Path:
+    event_id = slugify_event_id(event_id or aktywny_event_id())
+    return PUBLIC_RESULTS_DIR / event_id / "ranking.csv"
+
+
+def github_sciezka_rankingu(event_id: str | None = None) -> str:
+    event_id = slugify_event_id(event_id or aktywny_event_id())
+    cfg = st.session_state.get("event_cfg", {}) or {}
+    custom = str(cfg.get("plik_rankingu", "")).strip() if isinstance(cfg, dict) else ""
+    if custom:
+        return custom.replace("\\", "/").lstrip("/")
+    return f"public_results/{event_id}/ranking.csv"
+
+
+def link_panelu_zawodnika(event_id: str | None = None) -> str:
+    event_id = slugify_event_id(event_id or aktywny_event_id())
+    cfg = st.session_state.get("event_cfg", {}) or {}
+    custom = str(cfg.get("link_rezultaty", "")).strip() if isinstance(cfg, dict) else ""
+    if custom:
+        return custom
+    return (
+        "https://system-trap-ud8ffzmuwxrxsnzm7rbvlq.streamlit.app/"
+        f"?event={event_id}&view=zawodnik"
+    )
+
+
+def zbuduj_ranking_publiczny(df_input: pd.DataFrame) -> pd.DataFrame:
+    df = normalizuj_naglowki(df_input)
+    konkurencje = lista_konkurencji(df)
+    frames = []
+
+    for konkurencja in konkurencje:
+        ranking = zbuduj_ranking(df, konkurencja)
+        if ranking.empty:
+            continue
+        ranking.insert(0, "event_id", aktywny_event_id())
+        ranking.insert(1, "nazwa_zawodow", st.session_state.get("event_name", aktywny_event_id()))
+        ranking.insert(2, "opublikowano", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        frames.append(ranking)
+
+    if not frames:
+        return pd.DataFrame(columns=[
+            "event_id", "nazwa_zawodow", "opublikowano", "Miejsce", "Nazwisko i Imię",
+            "Konkurencja", "Grupa / Zmiana", "Limit rzutków", "Suma Trafień (Wynik)",
+            "Trafienia z 1. Strzału"
+        ])
+
+    return pd.concat(frames, ignore_index=True)
+
+
+def zapisz_ranking_publiczny_lokalnie(df_input: pd.DataFrame, event_id: str | None = None) -> Path:
+    event_id = slugify_event_id(event_id or aktywny_event_id())
+    out_path = sciezka_rankingu_online(event_id)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    ranking = zbuduj_ranking_publiczny(df_input)
+    ranking.to_csv(out_path, index=False, encoding="utf-8-sig")
+    return out_path
+
+
+def github_api_request(method: str, url: str, token: str, payload: dict | None = None) -> dict | None:
+    data = None
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "TRAP20-Streamlit",
+    }
+    if payload is not None:
+        data = json.dumps(payload).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            body = resp.read().decode("utf-8")
+            return json.loads(body) if body else None
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"GitHub API HTTP {e.code}: {body}")
+
+
+def publikuj_plik_na_github(local_path: Path, repo_path: str, message: str) -> dict:
+    token = pobierz_secret("GITHUB_TOKEN")
+    repo = pobierz_secret("GITHUB_REPO")
+    branch = pobierz_secret("GITHUB_BRANCH", "main") or "main"
+
+    if not token or not repo:
+        raise RuntimeError(
+            "Brakuje konfiguracji GitHub. Ustaw GITHUB_TOKEN i GITHUB_REPO w .streamlit/secrets.toml "
+            "albo w zmiennych środowiskowych."
+        )
+
+    repo_path = repo_path.replace("\\", "/").lstrip("/")
+    base_url = f"https://api.github.com/repos/{repo}/contents/{repo_path}"
+
+    sha = None
+    try:
+        existing = github_api_request("GET", f"{base_url}?ref={branch}", token)
+        if isinstance(existing, dict):
+            sha = existing.get("sha")
+    except RuntimeError as e:
+        if "HTTP 404" not in str(e):
+            raise
+
+    content_b64 = base64.b64encode(local_path.read_bytes()).decode("ascii")
+    payload = {
+        "message": message,
+        "content": content_b64,
+        "branch": branch,
+    }
+    if sha:
+        payload["sha"] = sha
+
+    return github_api_request("PUT", base_url, token, payload) or {}
+
+
+def usun_plik_z_github(repo_path: str, message: str) -> dict:
+    token = pobierz_secret("GITHUB_TOKEN")
+    repo = pobierz_secret("GITHUB_REPO")
+    branch = pobierz_secret("GITHUB_BRANCH", "main") or "main"
+
+    if not token or not repo:
+        raise RuntimeError("Brakuje GITHUB_TOKEN albo GITHUB_REPO.")
+
+    repo_path = repo_path.replace("\\", "/").lstrip("/")
+    base_url = f"https://api.github.com/repos/{repo}/contents/{repo_path}"
+    existing = github_api_request("GET", f"{base_url}?ref={branch}", token)
+    sha = existing.get("sha") if isinstance(existing, dict) else None
+    if not sha:
+        raise RuntimeError("Nie znaleziono pliku online do usunięcia.")
+
+    payload = {"message": message, "sha": sha, "branch": branch}
+    return github_api_request("DELETE", base_url, token, payload) or {}
+
+
+def publikuj_ranking_online(path: Path) -> tuple[Path, str]:
+    df = wczytaj_excel(path)
+    local_csv = zapisz_ranking_publiczny_lokalnie(df, aktywny_event_id())
+    repo_path = github_sciezka_rankingu(aktywny_event_id())
+    publikuj_plik_na_github(
+        local_csv,
+        repo_path,
+        f"TRAP20: publikacja rankingu {aktywny_event_id()} {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+    )
+    return local_csv, repo_path
+
+
+def pobierz_plik_z_github(repo_path: str) -> bytes | None:
+    """Pobiera plik z GitHub przez Contents API. Działa także dla prywatnego repo, jeżeli ustawiono token."""
+    token = pobierz_secret("GITHUB_TOKEN")
+    repo = pobierz_secret("GITHUB_REPO")
+    branch = pobierz_secret("GITHUB_BRANCH", "main") or "main"
+
+    if not token or not repo:
+        return None
+
+    repo_path = str(repo_path).replace("\\", "/").lstrip("/")
+    url = f"https://api.github.com/repos/{repo}/contents/{repo_path}?ref={branch}"
+
+    try:
+        data = github_api_request("GET", url, token)
+    except Exception:
+        return None
+
+    if not isinstance(data, dict):
+        return None
+
+    content = str(data.get("content", "")).replace("\n", "")
+    if not content:
+        return None
+
+    try:
+        return base64.b64decode(content)
+    except Exception:
+        return None
+
+
+def wczytaj_opublikowany_ranking(event_id: str | None = None) -> pd.DataFrame:
+    """Czyta opublikowany ranking.
+
+    Priorytet:
+    1. GitHub — dla Streamlit Cloud i publicznego panelu zawodnika.
+    2. Lokalny public_results — awaryjnie i podczas testów lokalnych.
+    """
+    event_id = slugify_event_id(event_id or aktywny_event_id())
+    repo_path = github_sciezka_rankingu(event_id)
+
+    github_bytes = pobierz_plik_z_github(repo_path)
+    if github_bytes:
+        try:
+            txt = github_bytes.decode("utf-8-sig")
+            return pd.read_csv(StringIO(txt), dtype=str).fillna("")
+        except Exception:
+            pass
+
+    csv_path = sciezka_rankingu_online(event_id)
+    if not csv_path.exists():
+        return pd.DataFrame()
+    return pd.read_csv(csv_path, dtype=str).fillna("")
+
+
 def policz_pliki_eventu(event_id: str) -> tuple[int, int]:
     event_id = slugify_event_id(event_id)
     active_dir = DATA_DIR / event_id
@@ -507,10 +755,11 @@ def pokaz_panel_administratora() -> None:
     events = wczytaj_events()
     config_info = events.get("_config", {}) if isinstance(events.get("_config", {}), dict) else {}
 
-    tab1, tab2, tab3 = st.tabs([
+    tab1, tab2, tab3, tab4 = st.tabs([
         "📋 Zawody",
         "📦 Pliki i archiwum",
         "🧾 Konfiguracja",
+        "☁️ Publikacja online",
     ])
 
     with tab1:
@@ -529,6 +778,7 @@ def pokaz_panel_administratora() -> None:
                 "Aktywny teraz": aktywny,
                 "Komunikat": komunikat,
                 "Nazwa": cfg.get("nazwa", ""),
+                "Organizator": cfg.get("organizator", ""),
                 "event_id": event_id,
                 "Aktywny od": cfg.get("aktywny_od", ""),
                 "Aktywny do": cfg.get("aktywny_do", ""),
@@ -540,6 +790,8 @@ def pokaz_panel_administratora() -> None:
                 "Pliki aktywne": aktywne_pliki,
                 "Pliki archiwum": archiwum_pliki,
                 "Google Sheet": cfg.get("google_sheet", ""),
+                "Link rezultatów": cfg.get("link_rezultaty", ""),
+                "Plik rankingu": cfg.get("plik_rankingu", ""),
             })
 
         if rows:
@@ -743,6 +995,56 @@ def pokaz_panel_administratora() -> None:
         }
         st.code(json.dumps(podglad, ensure_ascii=False, indent=2), language="json")
 
+    with tab4:
+        st.subheader("Publikowane rankingi online")
+        st.caption("Pliki ranking.csv są przechowywane w katalogu public_results/<event_id>/ranking.csv i mogą być publikowane do GitHub.")
+
+        events_user = eventy_uzytkowe(events)
+        if not events_user:
+            st.info("Brak eventów w konfiguracji.")
+        else:
+            opcje_eventow = sorted(events_user.keys())
+            wybor_kodu = st.selectbox("Wybierz event:", opcje_eventow, key="admin_online_event")
+            cfg = events_user[wybor_kodu]
+            event_id = slugify_event_id(cfg.get("event_id", wybor_kodu))
+            repo_path = str(cfg.get("plik_rankingu", "")).strip() or f"public_results/{event_id}/ranking.csv"
+            local_csv = sciezka_rankingu_online(event_id)
+
+            st.write(f"**event_id:** `{event_id}`")
+            st.write(f"**plik online:** `{repo_path}`")
+            if cfg.get("link_rezultaty"):
+                st.write(f"**link rezultatów:** {cfg.get('link_rezultaty')}")
+            else:
+                st.write(f"**link rezultatów:** `...?event={event_id}&view=zawodnik`")
+
+            if local_csv.exists():
+                st.success(f"Lokalny plik publikacji istnieje: {local_csv}")
+                st.download_button(
+                    "⬇️ Pobierz ranking.csv",
+                    data=local_csv.read_bytes(),
+                    file_name="ranking.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                )
+            else:
+                st.info("Brak lokalnego pliku public_results dla tego eventu.")
+
+            st.markdown("---")
+            st.markdown("#### 🗑️ Usuń ranking online")
+            st.warning("To usuwa ranking.csv z GitHub dla wybranego eventu. Lokalnego Excela zawodów nie usuwa.")
+            potwierdz = st.checkbox(f"Potwierdzam usunięcie publikacji online dla {event_id}", key=f"confirm_delete_online_{event_id}")
+            if potwierdz:
+                if st.button("🗑️ Usuń ranking online z GitHub", use_container_width=True):
+                    try:
+                        usun_plik_z_github(repo_path, f"TRAP20: usunięcie rankingu {event_id}")
+                        if local_csv.exists():
+                            local_csv.unlink()
+                        st.success("Ranking online usunięty.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Nie udało się usunąć rankingu online: {e}")
+
+
 def event_aktywny(event_cfg: dict) -> tuple[bool, str]:
     if not event_cfg.get("enabled", False):
         return False, "Kod zawodów jest wyłączony."
@@ -808,10 +1110,7 @@ def aktywny_event_id() -> str:
 
 def pokaz_qr_panel_zawodnika(event_id: str):
 
-    url = (
-        "https://system-trap-ud8ffzmuwxrxsnzm7rbvlq.streamlit.app/"
-        f"?event={event_id}&view=zawodnik"
-    )
+    url = link_panelu_zawodnika(event_id)
 
     with st.sidebar.expander("📱 QR dla zawodników", expanded=False):
 
@@ -1551,6 +1850,27 @@ for k, v in defaults.items():
         st.session_state[k] = v
 
 
+def znajdz_konfiguracje_eventu(event_value: str) -> tuple[str, str, dict]:
+    """Dopasowuje parametr event z linku QR do TRAP_CONFIG.
+
+    Zwraca: event_id, nazwa, konfiguracja. Jeżeli TRAP_CONFIG jest niedostępny,
+    wraca do samego parametru event, żeby panel publiczny nadal mógł szukać rankingu po ID.
+    """
+    event_value = str(event_value).strip()
+    event_slug = slugify_event_id(event_value)
+
+    try:
+        events = wczytaj_events()
+        for kod, cfg in eventy_uzytkowe(events).items():
+            cfg_event_id = slugify_event_id(cfg.get("event_id", kod))
+            if event_slug in [slugify_event_id(kod), cfg_event_id]:
+                return cfg_event_id, str(cfg.get("nazwa", cfg_event_id)), cfg
+    except Exception:
+        pass
+
+    return event_slug, event_value or event_slug, {}
+
+
 # ============================================================
 # TRYB WIDOKU: ADMIN / ZAWODNIK
 # ============================================================
@@ -1567,7 +1887,8 @@ if isinstance(event_param, list):
 
 if str(event_param).strip():
     # Link publiczny może wyglądać: ?event=snajper_lublin_20260620&view=zawodnik
-    ustaw_event(str(event_param).strip(), str(event_param).strip(), {})
+    resolved_event_id, resolved_name, resolved_cfg = znajdz_konfiguracje_eventu(str(event_param).strip())
+    ustaw_event(resolved_event_id, resolved_name, resolved_cfg)
 
 if TRYB_ZAWODNIKA:
     st.markdown(
@@ -1588,6 +1909,14 @@ if TRYB_ZAWODNIKA:
 
 if not TRYB_ZAWODNIKA:
     st.sidebar.header("🏆 TRAP")
+
+    _tryb = tryb_uruchomienia()
+    if _tryb == "LOKALNY":
+        st.sidebar.info("🟠 TRYB LOKALNY — wyniki zapisują się na tym komputerze. Publikacja online wymaga przycisku 📤.")
+    elif _tryb == "ONLINE":
+        st.sidebar.success("🟢 TRYB ONLINE — pracujesz na serwerze Streamlit.")
+    else:
+        st.sidebar.warning("⚪ Nie udało się jednoznacznie wykryć trybu uruchomienia.")
 
     EVENTS = wczytaj_events()
 
@@ -1818,6 +2147,50 @@ if not TRYB_ZAWODNIKA and st.session_state.get("admin_logged", False) and st.ses
 # ============================================================
 
 path = aktywny_path()
+
+# W trybie zawodnika najpierw próbujemy pokazać opublikowany ranking.csv.
+# Dzięki temu Streamlit Cloud może działać jako publiczna tablica wyników,
+# nawet jeżeli pełny plik Excel zawodów znajduje się tylko lokalnie u sędziego.
+if TRYB_ZAWODNIKA:
+    df_publiczny = wczytaj_opublikowany_ranking(aktywny_event_id())
+    if not df_publiczny.empty:
+        st.markdown('<div class="main-title">📊 TRAP20 — wyniki zawodów</div>', unsafe_allow_html=True)
+        st.caption("Publiczny ranking opublikowany przez organizatora.")
+        if st.button("🔄 Odśwież wyniki"):
+            st.rerun()
+        st.markdown("---")
+
+        if "opublikowano" in df_publiczny.columns and not df_publiczny["opublikowano"].empty:
+            st.info(f"Ostatnia publikacja: {df_publiczny['opublikowano'].iloc[0]}")
+
+        konkurencje_pub = sorted(df_publiczny.get("Konkurencja", pd.Series(dtype=str)).dropna().astype(str).unique().tolist())
+        if not konkurencje_pub:
+            st.info("Brak opublikowanych wyników.")
+        else:
+            tabs_pub = st.tabs([f"🏆 {k}" for k in konkurencje_pub] + ["🔎 Sprawdź zawodnika"])
+            for tab, konkurencja in zip(tabs_pub[:-1], konkurencje_pub):
+                with tab:
+                    df_k = df_publiczny[df_publiczny["Konkurencja"].astype(str) == konkurencja].copy()
+                    kolumny = [c for c in [
+                        "Miejsce", "Nazwisko i Imię", "Konkurencja", "Grupa / Zmiana",
+                        "Limit rzutków", "Suma Trafień (Wynik)", "Trafienia z 1. Strzału"
+                    ] if c in df_k.columns]
+                    st.dataframe(df_k[kolumny], use_container_width=True, hide_index=True)
+
+            with tabs_pub[-1]:
+                szukaj = st.text_input("Wpisz nazwisko zawodnika:", placeholder="np. KOWALSKI").strip().upper()
+                df_s = df_publiczny.copy()
+                if szukaj and "Nazwisko i Imię" in df_s.columns:
+                    df_s = df_s[df_s["Nazwisko i Imię"].astype(str).str.upper().str.contains(szukaj, na=False)]
+                if df_s.empty:
+                    st.info("Brak wyników dla podanego filtra.")
+                else:
+                    kolumny = [c for c in [
+                        "Miejsce", "Nazwisko i Imię", "Konkurencja", "Grupa / Zmiana",
+                        "Suma Trafień (Wynik)", "Trafienia z 1. Strzału"
+                    ] if c in df_s.columns]
+                    st.dataframe(df_s[kolumny], use_container_width=True, hide_index=True)
+        st.stop()
 
 if path is None:
     if st.session_state.get("zawody_zakonczone", False):
@@ -2253,6 +2626,21 @@ elif st.session_state.tryb_pracy == "STRZELANIE":
             type="primary",
             on_click=oznacz_kopie_pobrana,
         )
+
+        st.markdown("---")
+        st.subheader("☁️ Publikacja wyników online")
+        if tryb_uruchomienia() == "LOKALNY":
+            st.info("Pracujesz lokalnie. Ranking online dla zawodników zaktualizuje się dopiero po kliknięciu przycisku publikacji.")
+        else:
+            st.info("Pracujesz online. Ten przycisk może dodatkowo zapisać ranking.csv w public_results dla stałego podglądu zawodników.")
+
+        if st.button("📤 Opublikuj aktualny ranking online", use_container_width=True):
+            try:
+                local_csv, repo_path = publikuj_ranking_online(path)
+                st.success(f"Opublikowano ranking: {repo_path}")
+                st.caption(f"Lokalna kopia CSV: {local_csv}")
+            except Exception as e:
+                st.error(f"Nie udało się opublikować rankingu online: {e}")
 
         if st.session_state.get("kopia_pobrana", False):
             st.success("Kopia została pobrana. Możesz rozpocząć kolejną zmianę.")
