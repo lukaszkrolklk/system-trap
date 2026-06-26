@@ -57,6 +57,10 @@ ARKUSZ_REZULTATY_PK = "Rezultaty PK"
 
 KONKURENCJE_DOMYSLNE = ["TRAP20", "TRAP10", "PK", "STANDARD"]
 
+# Publiczne repozytorium wyników. Token NIE jest potrzebny do odczytu publicznego rankingu.
+DEFAULT_RESULTS_REPO = "lukaszkrolklk/TRAP20_RESULTS"
+DEFAULT_RESULTS_BRANCH = "main"
+
 
 # ============================================================
 # STYL
@@ -684,34 +688,48 @@ def publikuj_ranking_online(path: Path) -> tuple[Path, str]:
 
 
 def pobierz_plik_z_github(repo_path: str) -> bytes | None:
-    """Pobiera plik z GitHub przez Contents API. Działa także dla prywatnego repo, jeżeli ustawiono token."""
-    token = pobierz_secret("GITHUB_TOKEN")
-    repo = pobierz_secret("GITHUB_REPO")
-    branch = pobierz_secret("GITHUB_BRANCH", "main") or "main"
+    """Pobiera plik z GitHub.
 
-    if not token or not repo:
-        return None
+    Priorytet:
+    1. GitHub Contents API z tokenem — potrzebne dla repo prywatnego.
+    2. Publiczny raw.githubusercontent.com — działa bez tokena dla publicznego repo.
+
+    Dzięki temu panel zawodnika na Streamlit Cloud może czytać opublikowany ranking
+    nawet wtedy, gdy w Secrets nie ustawiono tokena do odczytu.
+    """
+    token = pobierz_secret("GITHUB_TOKEN")
+    repo = pobierz_secret("GITHUB_REPO", DEFAULT_RESULTS_REPO) or DEFAULT_RESULTS_REPO
+    branch = pobierz_secret("GITHUB_BRANCH", DEFAULT_RESULTS_BRANCH) or DEFAULT_RESULTS_BRANCH
 
     repo_path = str(repo_path).replace("\\", "/").lstrip("/")
-    url = f"https://api.github.com/repos/{repo}/contents/{repo_path}?ref={branch}"
 
-    try:
-        data = github_api_request("GET", url, token)
-    except Exception:
-        return None
+    # 1) Próba przez GitHub API, jeśli token jest dostępny.
+    if token and repo:
+        url = f"https://api.github.com/repos/{repo}/contents/{repo_path}?ref={branch}"
+        try:
+            data = github_api_request("GET", url, token)
+            if isinstance(data, dict):
+                content = str(data.get("content", "")).replace("\n", "")
+                if content:
+                    return base64.b64decode(content)
+        except Exception:
+            pass
 
-    if not isinstance(data, dict):
-        return None
+    # 2) Fallback publiczny — dla publicznego repo TRAP20_RESULTS.
+    if repo:
+        raw_url = f"https://raw.githubusercontent.com/{repo}/{branch}/{repo_path}"
+        try:
+            req = urllib.request.Request(
+                raw_url,
+                headers={"User-Agent": "TRAP20-Streamlit"},
+                method="GET",
+            )
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                return resp.read()
+        except Exception:
+            return None
 
-    content = str(data.get("content", "")).replace("\n", "")
-    if not content:
-        return None
-
-    try:
-        return base64.b64decode(content)
-    except Exception:
-        return None
-
+    return None
 
 def wczytaj_opublikowany_ranking(event_id: str | None = None) -> pd.DataFrame:
     """Czyta opublikowany ranking.
@@ -2193,7 +2211,13 @@ if TRYB_ZAWODNIKA:
         st.stop()
 
 if path is None:
-    if st.session_state.get("zawody_zakonczone", False):
+    if TRYB_ZAWODNIKA:
+        st.markdown('<div class="main-title">📊 TRAP20 — wyniki zawodów</div>', unsafe_allow_html=True)
+        st.info("Ranking dla tych zawodów nie został jeszcze opublikowany albo chwilowo nie można go pobrać. Odśwież stronę za kilka minut.")
+        st.caption(f"event_id: {aktywny_event_id()}")
+        if st.button("🔄 Odśwież wyniki"):
+            st.rerun()
+    elif st.session_state.get("zawody_zakonczone", False):
         st.success("Zawody zostały zakończone. Aby rozpocząć nowe, pobierz listę z Google i utwórz nowy plik zawodów.")
     else:
         st.warning("Najpierw wpisz kod zawodów / link Google i utwórz plik zawodów.")
@@ -2731,4 +2755,3 @@ elif st.session_state.tryb_pracy == "STRZELANIE":
         if st.button("⬅️ Anuluj zmianę i wróć do menu", use_container_width=True):
             zakoncz_i_wroc_do_menu()
             st.rerun()
-
