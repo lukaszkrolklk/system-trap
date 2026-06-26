@@ -1014,8 +1014,8 @@ def pokaz_panel_administratora() -> None:
         st.code(json.dumps(podglad, ensure_ascii=False, indent=2), language="json")
 
     with tab4:
-        st.subheader("Publikowane rankingi online")
-        st.caption("Pliki ranking.csv są przechowywane w katalogu public_results/<event_id>/ranking.csv i mogą być publikowane do GitHub.")
+        st.subheader("☁️ Publikacja online")
+        st.caption("Panel pokazuje tylko te akcje, które mają sens dla wybranego eventu.")
 
         events_user = eventy_uzytkowe(events)
         if not events_user:
@@ -1027,40 +1027,79 @@ def pokaz_panel_administratora() -> None:
             event_id = slugify_event_id(cfg.get("event_id", wybor_kodu))
             repo_path = str(cfg.get("plik_rankingu", "")).strip() or f"public_results/{event_id}/ranking.csv"
             local_csv = sciezka_rankingu_online(event_id)
+            link_rezultatow = str(cfg.get("link_rezultaty", "")).strip() or f"...?event={event_id}&view=zawodnik"
 
-            st.write(f"**event_id:** `{event_id}`")
-            st.write(f"**plik online:** `{repo_path}`")
-            if cfg.get("link_rezultaty"):
-                st.write(f"**link rezultatów:** {cfg.get('link_rezultaty')}")
-            else:
-                st.write(f"**link rezultatów:** `...?event={event_id}&view=zawodnik`")
+            local_exists = local_csv.exists()
+            online_bytes = pobierz_plik_z_github(repo_path)
+            online_df = pd.DataFrame()
+            online_exists = False
+            online_rows = 0
+            online_published_at = ""
 
-            if local_csv.exists():
-                st.success(f"Lokalny plik publikacji istnieje: {local_csv}")
+            if online_bytes:
+                try:
+                    online_txt = online_bytes.decode("utf-8-sig")
+                    online_df = pd.read_csv(StringIO(online_txt), dtype=str).fillna("")
+                    online_rows = len(online_df)
+                    online_exists = True
+                    if online_rows > 0 and "opublikowano" in online_df.columns:
+                        online_published_at = str(online_df["opublikowano"].iloc[0])
+                except Exception:
+                    online_exists = True
+
+            st.markdown("#### Status publikacji")
+
+            if local_exists:
+                st.success("🟢 Lokalny ranking jest gotowy. Możesz go pobrać albo opublikować ponownie po zakończeniu kolejnej zmiany.")
                 st.download_button(
-                    "⬇️ Pobierz ranking.csv",
+                    "⬇️ Pobierz lokalny ranking.csv",
                     data=local_csv.read_bytes(),
                     file_name="ranking.csv",
                     mime="text/csv",
                     use_container_width=True,
                 )
             else:
-                st.info("Brak lokalnego pliku public_results dla tego eventu.")
+                st.info(
+                    "⚪ Dla tego eventu nie ma jeszcze lokalnego rankingu. "
+                    "Ranking zostanie utworzony automatycznie po zakończeniu pierwszej konkurencji lub po pierwszej publikacji."
+                )
 
-            st.markdown("---")
-            st.markdown("#### 🗑️ Usuń ranking online")
-            st.warning("To usuwa ranking.csv z GitHub dla wybranego eventu. Lokalnego Excela zawodów nie usuwa.")
-            potwierdz = st.checkbox(f"Potwierdzam usunięcie publikacji online dla {event_id}", key=f"confirm_delete_online_{event_id}")
-            if potwierdz:
-                if st.button("🗑️ Usuń ranking online z GitHub", use_container_width=True):
-                    try:
-                        usun_plik_z_github(repo_path, f"TRAP20: usunięcie rankingu {event_id}")
-                        if local_csv.exists():
-                            local_csv.unlink()
-                        st.success("Ranking online usunięty.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Nie udało się usunąć rankingu online: {e}")
+            if online_exists and online_rows > 0:
+                opis_publikacji = f"🟢 Ranking online jest opublikowany. Liczba pozycji: {online_rows}."
+                if online_published_at:
+                    opis_publikacji += f" Ostatnia publikacja: {online_published_at}."
+                st.success(opis_publikacji)
+                st.write(f"**Link dla zawodników:** {link_rezultatow}")
+            elif online_exists:
+                st.warning("🟠 Plik publikacji online istnieje, ale nie zawiera jeszcze wyników zawodników.")
+            else:
+                st.info("🔵 Ranking online nie został jeszcze opublikowany dla tego eventu.")
+
+            with st.expander("Szczegóły techniczne", expanded=False):
+                st.write(f"**event_id:** `{event_id}`")
+                st.write(f"**plik online:** `{repo_path}`")
+                st.write(f"**link rezultatów:** {link_rezultatow}")
+                st.write(f"**lokalny plik:** `{local_csv}`")
+
+            if online_exists:
+                st.markdown("---")
+                st.markdown("#### 🗑️ Usuń ranking online")
+                st.warning("Ta operacja usunie ranking.csv z GitHub dla wybranego eventu. Lokalnego Excela zawodów nie usuwa.")
+                potwierdz = st.checkbox(
+                    f"Potwierdzam usunięcie publikacji online dla {event_id}",
+                    key=f"confirm_delete_online_{event_id}",
+                )
+                if potwierdz:
+                    if st.button("🗑️ Usuń ranking online z GitHub", use_container_width=True):
+                        try:
+                            usun_plik_z_github(repo_path, f"TRAP20: usunięcie rankingu {event_id}")
+                            st.success("Ranking online usunięty.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Nie udało się usunąć rankingu online: {e}")
+            else:
+                st.markdown("---")
+                st.caption("Usuwanie publikacji pojawi się dopiero wtedy, gdy ranking online będzie faktycznie istnieć.")
 
 
 def event_aktywny(event_cfg: dict) -> tuple[bool, str]:
